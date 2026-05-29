@@ -25,6 +25,19 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
+  const lastAction = state.log.slice().reverse().find((entry) => entry.channel === 'action');
+  if (lastAction?.title.includes('房东在试探') || lastAction?.text.includes('发了出去')) {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'message_reply',
+      title: '消息接上了',
+      rationale: '玩家刚刚回复了陈怀民或陌生号码，本回合应该先承接对话，而不是切到新的敲门/断电压力。',
+      responseHint: '手机屏幕在十几秒后再次亮起。陌生号码只回：“哪个包裹？你先别动，我上来确认一下。”字句很短，却把话题钉回了门口那只纸箱。',
+      visibleToPlayer: true,
+      risk: 'medium',
+    };
+  }
+
   if (state.policePhase !== 'not_contacted' && !state.clues.includes('police_verified') && state.threat >= 55) {
     return {
       id: `killer-${Date.now()}`,

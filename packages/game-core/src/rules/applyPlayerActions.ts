@@ -23,6 +23,15 @@ function calculateTurnTime(actions: ActionPlan['actions']) {
   return clamp(Math.ceil(complexity / 2), 1, 3);
 }
 
+function extractReplyText(raw: string) {
+  const quoted = raw.match(/[“"']([^”"']+)[”"']/)?.[1]?.trim();
+  if (quoted) return quoted;
+  return raw
+    .replace(/我(回了|回复|回)他[:：]?/g, '')
+    .replace(/(回消息|回短信|回复消息|回复短信|打字回复)[:：]?/g, '')
+    .trim();
+}
+
 function pushEntry(state: GameState, result: Omit<RuleResult, 'state'>) {
   const entry: StoryLogEntry = {
     id: `log-${state.run}-${state.minute}-${Math.random().toString(36).slice(2, 8)}`,
@@ -116,7 +125,8 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
           addClue(state, addedClues, 'chen_probe');
           title = '房东在试探';
           tone = 'threat';
-          texts.push('联系陈怀民：录音开启；对方询问快递是否被看见，语气停顿异常。');
+          const replyText = extractReplyText(action.raw);
+          texts.push(`联系陈怀民：你把“${replyText}”发了出去；这次回合只确认这句回复已经送达，不替你补出额外动作。`);
         }
         break;
       case 'deceive':

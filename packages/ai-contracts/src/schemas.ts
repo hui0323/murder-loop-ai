@@ -69,11 +69,13 @@ export const KillerStrategySchema = z.object({
     'lure_linyue',
     'fake_neighbor',
     'fake_callback',
+    'message_reply',
     'wait_for_fatigue',
     'retreat',
   ]),
   title: z.string(),
   rationale: z.string(),
+  responseHint: z.string().optional(),
   visibleToPlayer: z.boolean(),
   risk: z.enum(['low', 'medium', 'high']),
 });
@@ -105,6 +107,12 @@ export const NarrationContextSchema = z.object({
     clues: z.array(z.string()),
     ending: z.string().nullable(),
   }),
+  recentLog: z.array(z.object({
+    minute: z.number(),
+    title: z.string(),
+    text: z.string(),
+    channel: z.string().optional(),
+  })).optional(),
   forbiddenFacts: z.array(z.string()),
   styleGuide: z.array(z.string()),
 });

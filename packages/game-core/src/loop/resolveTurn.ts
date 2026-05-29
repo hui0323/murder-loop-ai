@@ -9,7 +9,7 @@ import { advanceAmbientTurn } from '../ambient/advanceAmbientTurn';
 
 export interface AiAdapters {
   parseAction?: (input: string, state: GameState) => Promise<ActionPlan>;
-  chooseKillerStrategy?: (state: GameState) => Promise<KillerStrategy>;
+  chooseKillerStrategy?: (state: GameState, plan?: ActionPlan, playerResult?: TurnResolution['playerResult']) => Promise<KillerStrategy>;
   narrate?: (context: NarrationContext, playerResult: TurnResolution['playerResult'], killerResult: TurnResolution['killerResult'], state: GameState) => Promise<Narration>;
   narrateAction?: (context: NarrationContext, playerResult: TurnResolution['playerResult'], killerResult: TurnResolution['killerResult'], state: GameState) => Promise<Narration>;
   narrateAmbient?: (context: NarrationContext, playerResult: TurnResolution['playerResult'], killerResult: TurnResolution['killerResult'], state: GameState) => Promise<Narration>;
@@ -30,7 +30,7 @@ export async function resolveTurn(state: GameState, input: string, aiAdapters: A
   const killerStrategy = playerResult.state.ending
     ? chooseFallbackKillerStrategy(playerResult.state)
     : aiAdapters.chooseKillerStrategy
-      ? await aiAdapters.chooseKillerStrategy(playerResult.state).catch(() => chooseFallbackKillerStrategy(playerResult.state))
+      ? await aiAdapters.chooseKillerStrategy(playerResult.state, plan, playerResult).catch(() => chooseFallbackKillerStrategy(playerResult.state))
       : chooseFallbackKillerStrategy(playerResult.state);
 
   const killerResult = playerResult.state.ending ? { ...playerResult, text: '', title: '对抗结束', tone: 'system' as const, addedClues: [], timePassed: 0, threatDelta: 0, events: [] } : applyKillerStrategy(playerResult.state, killerStrategy);

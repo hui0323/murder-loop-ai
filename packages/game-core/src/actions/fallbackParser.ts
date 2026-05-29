@@ -20,6 +20,20 @@ const includesOpenDoorNegation = (text: string) =>
     '不要让他进来',
   ]);
 
+const directReplyMarkers = [
+  '我回了他',
+  '我回复他',
+  '我回他',
+  '回了他',
+  '回复他',
+  '给他回',
+  '回消息',
+  '回短信',
+  '回复消息',
+  '回复短信',
+  '打字回复',
+];
+
 function normalize(input: string) {
   return input.toLowerCase().replace(/\s+/g, '').replace(/[，。！？、,.!?]/g, '');
 }
@@ -63,6 +77,14 @@ export function fallbackParseAction(input: string): ActionPlan {
 
   if (includesAny(text, ['林越', '前男友', '发给他', '让他报警', '让他在楼下', '别上楼', '不要上楼', '短信'])) {
     actions.push(createAction(raw, 'communicate', 'linyue', '联系林越并传递外部任务', 0.88, 2, 0, 'medium'));
+  }
+
+  if (
+    includesAny(raw, directReplyMarkers)
+    || /[“"'].*[”"']/.test(raw)
+    || includesAny(text, ['有啊怎么了', '看到了怎么了', '拿进去了怎么了', '你是谁', '你要干什么'])
+  ) {
+    actions.push(createAction(raw, 'communicate', 'chen_huaimin', `回复陌生号码或门外的人：${raw}`, 0.9, 1, 0, 'medium'));
   }
 
   if (includesAny(text, ['报警', '110', '警察', '警方'])) {

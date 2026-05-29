@@ -98,6 +98,11 @@ export function applyKillerStrategy(current: GameState, strategy: KillerStrategy
       state.killerPhase = 'deception';
       text = '本地座机号码来电，自称官方回拨，但背景声音异常单一。';
       break;
+    case 'message_reply':
+      threatDelta = strategy.risk === 'high' ? 7 : strategy.risk === 'medium' ? 4 : 1;
+      state.killerPhase = 'deception';
+      text = strategy.responseHint || '陌生号码很快回了消息，没有继续敲门，只把问题往包裹上拽：他要确认我到底看见了什么。';
+      break;
     case 'wait_for_fatigue':
       threatDelta = 3;
       text = '门外长时间安静；电梯井偶尔传来一声很轻的金属回响。';

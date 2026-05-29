@@ -264,10 +264,12 @@ export interface KillerStrategy {
     | 'lure_linyue'
     | 'fake_neighbor'
     | 'fake_callback'
+    | 'message_reply'
     | 'wait_for_fatigue'
     | 'retreat';
   title: string;
   rationale: string;
+  responseHint?: string;
   visibleToPlayer: boolean;
   risk: 'low' | 'medium' | 'high';
 }
