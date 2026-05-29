@@ -30,6 +30,12 @@ export function buildNarrationContext(playerResult: RuleResult, killerResult: Ru
       clues: state.clues,
       ending: state.ending,
     },
+    recentLog: state.log.slice(-5).map((entry) => ({
+      minute: entry.minute,
+      title: entry.title,
+      text: entry.text.slice(0, 160),
+      channel: entry.channel,
+    })),
     forbiddenFacts: [
       '不要新增房间里不存在的人或物。',
       '不要让警察、林越或凶手突然进入现场，除非事件中明确发生。',
@@ -38,6 +44,7 @@ export function buildNarrationContext(playerResult: RuleResult, killerResult: Ru
       '不要替玩家写心理感受、内心独白、恐惧、担忧、领悟或判断。',
       '不要写“我害怕”“我明白”“我意识到”“我感觉”“我知道他在想什么”。',
       '不要照抄规则 fallback 文本。',
+      '不要复述 recentLog 里最近两回合已经出现过的具体句子、短信问法或敲门借口。',
     ],
     styleGuide: [
       '第一人称限知视角，但只呈现现实反馈，不替玩家思考。',

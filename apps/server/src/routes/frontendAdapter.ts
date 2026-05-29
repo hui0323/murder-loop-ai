@@ -43,13 +43,14 @@ function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
 
 async function parseActionForFrontend(input: string, state: GameState, blackboard = createTurnBlackboard(input, state)): Promise<ActionPlan> {
   const fallback = fallbackParseAction(input);
-  const ai = await completeRoleJson(
-    'parse',
+  try {
+    const ai = await completeRoleJson(
+      'parse',
     [
       '你是《23:47》行动解析 AI。玩家用自然语言写一组求生动作，你要把它拆成可裁判的 JSON。',
       '第一原则：尊重否定词和条件词。“不开门/不要开门/别让他进来”绝不能解析成 open_door；“如果对方身份核实失败就不开门”也不是 open_door。',
       '只解析玩家明确要做的事，不替玩家补全聪明操作，不制造事实，不判断生死。',
-      '复杂输入拆成 1-6 个动作，顺序保持玩家原意。每个动作给出 intent、target、method、timeCost、noise、risk、confidence。',
+      '复杂输入拆成 1-6 个动作，顺序保持玩家原意。每个动作给出 intent、target、method、timeCost、noise、risk、confidence。timeCost 只表示复杂度：普通动作填 1，复杂检查/报警/加固最多填 2；后端会把单回合总耗时压缩到 1-3 分钟。',
       'method 用中文短句，像“隔门询问并录音”“拍照备份包裹”“锁窗拉帘”，不要写开发术语。',
       '如果输入含糊，把核心安全动作解析出来，并在 warnings 里写需要玩家确认的歧义。',
       '只输出 JSON，必须符合 ActionPlanSchema。',
@@ -60,13 +61,18 @@ async function parseActionForFrontend(input: string, state: GameState, blackboar
   const parsed = ActionPlanSchema.safeParse(ai);
   if (!parsed.success) throw new Error('parse action schema mismatch');
   return verifyActionPlan(input, parsed.data, blackboard);
+  } catch (error) {
+    blackboard.warnings.push(`parse action AI failed; using fallback parser. ${error instanceof Error ? error.message : String(error)}`);
+    return verifyActionPlan(input, fallback, blackboard);
+  }
 }
 
 async function chooseKillerStrategyForFrontend(state: GameState, blackboard = createTurnBlackboard('', state)): Promise<KillerStrategy> {
   const visible = projectKillerVisibleState(state);
   const fallback = chooseFallbackKillerStrategy(state);
-  const ai = await completeRoleJson(
-    'killer',
+  try {
+    const ai = await completeRoleJson(
+      'killer',
     [
       '你是《23:47》的暗线导演，只负责陈怀民与楼道环境的下一步压力，不写小说正文。',
       '你只能看 visibleState。玩家没有暴露的位置、证据备份、心理活动、房内细节，你都不知道。不要全知反制。',
@@ -82,6 +88,10 @@ async function chooseKillerStrategyForFrontend(state: GameState, blackboard = cr
   const parsed = KillerStrategySchema.safeParse(ai);
   if (!parsed.success) throw new Error('killer strategy schema mismatch');
   return verifyKillerStrategy(state, parsed.data, blackboard);
+  } catch (error) {
+    blackboard.warnings.push(`killer strategy AI failed; using fallback strategy. ${error instanceof Error ? error.message : String(error)}`);
+    return verifyKillerStrategy(state, fallback, blackboard);
+  }
 }
 
 async function narrateActionForFrontend(context: NarrationContext, playerResult: RuleResult, killerResult: RuleResult, state: GameState, blackboard = createTurnBlackboard('', state)): Promise<Narration> {
@@ -91,6 +101,7 @@ async function narrateActionForFrontend(context: NarrationContext, playerResult:
       '目标是让玩家感到输入被认真执行：动作顺序、物体变化、代价、遗漏和可利用信息都要具体。',
       '文风参考悬疑网文：段落有推进，句子有钩子，但不要中二，不要空喊恐惧。多写门锁、猫眼、手机冷光、纸箱气味、脚步距离、手上动作。',
       '可以有极短的第一人称反应，但不能替玩家悟出真相，不能泄露凶手内心。',
+      '必须查看 narrationContext.recentLog，避免复述最近两回合已经出现过的短信问法、敲门借口和具体句子。',
       '220-520 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
     ].join('\n');
   const fallback = createFallbackActionNarration(playerResult);
@@ -133,6 +144,7 @@ async function narrateAmbientForFrontend(context: NarrationContext, playerResult
       '不要复述玩家动作细节，不要写玩家心理，不要解释凶手计划。你只呈现玩家能直接感知的现象。',
       '节奏要短促、有镜头感：每次只推进一个压力点。不要每回合都大爆发，安静、停顿、误导同样重要。',
       '语言要像悬疑网文的收尾钩子：具体、克制、最后一句压住下一步选择。',
+      '必须查看 narrationContext.recentLog，避免复述最近两回合已经出现过的短信问法、敲门借口和具体句子。',
       '90-240 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
     ].join('\n');
   const fallback = createFallbackAmbientNarration(playerResult, killerResult);

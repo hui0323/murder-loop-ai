@@ -1,6 +1,6 @@
 import { env } from '../env';
 
-export const providers = ['openai', 'deepseek', 'deepseek_killer', 'deepseek_npc', 'deepseek_recap', 'duckingmind'] as const;
+export const providers = ['openai', 'deepseek', 'deepseek_killer', 'deepseek_narrator', 'deepseek_npc', 'deepseek_recap', 'duckingmind'] as const;
 export type AiProvider = (typeof providers)[number];
 
 export type AiRole = 'parse' | 'killer' | 'narrator' | 'npc' | 'recap';

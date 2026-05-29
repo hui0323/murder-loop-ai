@@ -10,6 +10,7 @@ interface CompletionOptions {
 function configFor(provider: AiProvider, modelOverride?: string) {
   if (provider === 'deepseek') return { apiKey: env.deepseekApiKey, baseURL: env.deepseekBaseUrl, model: modelOverride || env.deepseekModel };
   if (provider === 'deepseek_killer') return { apiKey: env.deepseekKillerApiKey || env.deepseekApiKey, baseURL: env.deepseekKillerBaseUrl, model: modelOverride || env.deepseekKillerModel };
+  if (provider === 'deepseek_narrator') return { apiKey: env.deepseekNarratorApiKey || env.deepseekApiKey, baseURL: env.deepseekNarratorBaseUrl, model: modelOverride || env.deepseekNarratorModel };
   if (provider === 'deepseek_npc') return { apiKey: env.deepseekNpcApiKey || env.deepseekApiKey, baseURL: env.deepseekNpcBaseUrl, model: modelOverride || env.deepseekNpcModel };
   if (provider === 'deepseek_recap') return { apiKey: env.deepseekRecapApiKey || env.deepseekApiKey, baseURL: env.deepseekRecapBaseUrl, model: modelOverride || env.deepseekRecapModel };
   if (provider === 'duckingmind') return { apiKey: env.duckingmindApiKey || env.openaiApiKey, baseURL: env.duckingmindBaseUrl, model: modelOverride || env.duckingmindModel };
@@ -17,7 +18,7 @@ function configFor(provider: AiProvider, modelOverride?: string) {
 }
 
 function defaultTemperature(provider: AiProvider) {
-  if (provider === 'deepseek' || provider === 'deepseek_killer' || provider === 'deepseek_npc' || provider === 'deepseek_recap') return 0.35;
+  if (provider === 'deepseek' || provider === 'deepseek_killer' || provider === 'deepseek_narrator' || provider === 'deepseek_npc' || provider === 'deepseek_recap') return 0.35;
   return 0.68;
 }
 

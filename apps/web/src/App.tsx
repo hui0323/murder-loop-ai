@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { StoryPanel } from './components/StoryPanel';
 import { InputArea } from './components/InputArea';
@@ -28,11 +28,34 @@ interface EndingCinematicPayload {
   method?: string | null;
 }
 
+const FRONTEND_SAVE_KEY = 'murder-loop-ai:frontend-state:v1';
+
+function loadFrontendState(): GameState {
+  if (typeof window === 'undefined') return INITIAL_STATE;
+  try {
+    const raw = window.localStorage.getItem(FRONTEND_SAVE_KEY);
+    if (!raw) return INITIAL_STATE;
+    return { ...INITIAL_STATE, ...(JSON.parse(raw) as Partial<GameState>), isParsing: false, isParsingAction: false, actionConfirmation: null };
+  } catch {
+    return INITIAL_STATE;
+  }
+}
+
+function persistFrontendState(state: GameState) {
+  if (typeof window === 'undefined') return;
+  const cleanState: GameState = { ...state, isParsing: false, isParsingAction: false, actionConfirmation: null };
+  window.localStorage.setItem(FRONTEND_SAVE_KEY, JSON.stringify(cleanState));
+}
+
 export default function App() {
   const [showCinematic, setShowCinematic] = useState(true);
   const [endingCinematic, setEndingCinematic] = useState<EndingCinematicPayload | null>(null);
-  const [state, setState] = useState<GameState>(INITIAL_STATE);
+  const [state, setState] = useState<GameState>(() => loadFrontendState());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    persistFrontendState(state);
+  }, [state]);
 
   const handleActionSubmit = async (actionText: string) => {
     const newLogId = Date.now().toString();
@@ -57,22 +80,25 @@ export default function App() {
       const result = (await response.json()) as FrontendResolveResponse;
       const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
 
-      setState(prev => ({
-        ...prev,
+      const nextState: GameState = {
+        ...state,
         isParsing: false,
         actionConfirmation: null,
-        time: result.time ?? prev.time,
-        location: result.location ?? prev.location,
-        phase: result.phase ?? prev.phase,
-        clues: result.clues ?? prev.clues,
-        coreState: result.coreState ?? prev.coreState,
-        ending: result.ending ?? prev.ending,
-        deathTitle: result.deathTitle ?? prev.deathTitle,
-        deathSummary: result.deathSummary ?? prev.deathSummary,
-        deathMethod: result.deathMethod ?? prev.deathMethod,
-        coordination: result.coordination ?? prev.coordination,
-        storyLog: [...prev.storyLog, ...resultLog],
-      }));
+        time: result.time ?? state.time,
+        location: result.location ?? state.location,
+        phase: result.phase ?? state.phase,
+        clues: result.clues ?? state.clues,
+        coreState: result.coreState ?? state.coreState,
+        ending: result.ending ?? state.ending,
+        deathTitle: result.deathTitle ?? state.deathTitle,
+        deathSummary: result.deathSummary ?? state.deathSummary,
+        deathMethod: result.deathMethod ?? state.deathMethod,
+        coordination: result.coordination ?? state.coordination,
+        storyLog: [...state.storyLog, ...resultLog],
+      };
+
+      persistFrontendState(nextState);
+      setState(nextState);
 
       if (result.ending && result.ending !== state.ending) {
         setEndingCinematic({
@@ -99,47 +125,9 @@ export default function App() {
     }
   };
 
-  // Mock Confirmation & Resolution (Phase 2: Execution & Response)
+  // Confirmation is kept for component compatibility; free-form input now executes directly.
   const handleConfirmAction = () => {
-    setState(prev => ({
-      ...prev,
-      actionConfirmation: null,
-      storyLog: [
-        ...prev.storyLog,
-        { 
-          id: `sys-${Date.now()}`, 
-          type: 'action_result', 
-          content: '执行成功... 时间流逝 3 分钟。' 
-        }
-      ]
-    }));
-
-    // Mock GM/Narrator Response delay
-    setTimeout(() => {
-      setState(prev => {
-        let newTime = '23:03';
-        if (prev.time === '23:03') newTime = '23:08';
-        
-        return {
-          ...prev,
-          time: newTime,
-          storyLog: [
-            ...prev.storyLog,
-            {
-              id: `sys-${Date.now()}-1`,
-              type: 'system',
-              content: '凶手感知到异常响动'
-            },
-            {
-              id: `narrative-${Date.now()}`,
-              type: 'narrative',
-              timestamp: newTime,
-              content: '你轻手轻脚地走到门边，透过猫眼往外看。楼道昏暗的感应灯并没有亮，外面一片死寂。\n\n忽然，你听到门外极近的地方，传来布料摩擦木门的细微沙沙声。似乎有人正贴在你的门上。'
-            }
-          ]
-        };
-      });
-    }, 1200);
+    setState(prev => ({ ...prev, actionConfirmation: null }));
   };
 
   const handleCancelAction = () => {

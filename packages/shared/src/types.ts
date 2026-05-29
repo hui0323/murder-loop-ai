@@ -237,6 +237,7 @@ export interface NarrationContext {
     clues: string[];
     ending: EndingId | null;
   };
+  recentLog: Array<Pick<StoryLogEntry, 'minute' | 'title' | 'text' | 'channel'>>;
   forbiddenFacts: string[];
   styleGuide: string[];
 }

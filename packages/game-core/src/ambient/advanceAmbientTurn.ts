@@ -9,7 +9,7 @@ function clamp(value: number, min = 0, max = 100) {
 
 export function advanceAmbientTurn(current: GameState): RuleResult {
   const state = cloneGameState(current);
-  const timePassed = 3;
+  const timePassed = 1;
   const threatDelta = state.threat >= 55 ? 9 : state.threat >= 42 ? 6 : 3;
 
   state.minute += timePassed;

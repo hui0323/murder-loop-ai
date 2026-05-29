@@ -15,6 +15,14 @@ function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
 }
 
+function calculateTurnTime(actions: ActionPlan['actions']) {
+  if (actions.length === 0) return 1;
+  const onlyWaiting = actions.every((action) => action.intent === 'wait');
+  if (onlyWaiting) return 1;
+  const complexity = actions.reduce((sum, action) => sum + Math.max(1, Math.min(action.timeCost || 1, 2)), 0);
+  return clamp(Math.ceil(complexity / 2), 1, 3);
+}
+
 function pushEntry(state: GameState, result: Omit<RuleResult, 'state'>) {
   const entry: StoryLogEntry = {
     id: `log-${state.run}-${state.minute}-${Math.random().toString(36).slice(2, 8)}`,
@@ -40,18 +48,18 @@ function markEnding(state: GameState, ending: NonNullable<GameState['ending']>, 
 export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleResult {
   const state = cloneGameState(current);
   const addedClues: string[] = [];
-  let timePassed = 0;
+  let complexityCost = 0;
   let threatDelta = 0;
   const texts: string[] = [];
   let title = '行动开始';
   let tone: RuleResult['tone'] = 'neutral';
 
   if (state.ending) {
-    return { title: '循环已经结束', text: '这一轮已经抵达结局。', tone: 'system', addedClues, timePassed, threatDelta, events: [event('ending', 'loop', '这一轮已经抵达结局。')], state };
+    return { title: '循环已经结束', text: '这一轮已经抵达结局。', tone: 'system', addedClues, timePassed: 0, threatDelta, events: [event('ending', 'loop', '这一轮已经抵达结局。')], state };
   }
 
   for (const action of plan.actions) {
-    timePassed += action.timeCost;
+    complexityCost += action.timeCost;
     threatDelta += Math.max(0, action.noise - 1);
     state.player.stress = clamp(state.player.stress + (action.risk === 'high' ? 8 : action.risk === 'medium' ? 3 : 1));
 
@@ -195,6 +203,9 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     }
   }
 
+  const timePassed = calculateTurnTime(plan.actions);
+  const compressedTime = complexityCost > timePassed;
+
   state.minute += timePassed;
   state.threat = clamp(state.threat + threatDelta + (state.minute >= DEADLINE_MINUTE - 10 ? 4 : 0));
 
@@ -214,7 +225,13 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     state.policePhase = 'real_police_en_route';
   }
 
-  state.phase = state.policePhase !== 'not_contacted' ? 'police_called' : state.threat >= 48 ? 'killer_pressure' : 'investigating';
+  state.phase = state.minute >= DEADLINE_MINUTE - 5
+    ? 'pre_2347_countdown'
+    : state.policePhase !== 'not_contacted'
+      ? 'police_called'
+      : state.threat >= 48
+        ? 'killer_pressure'
+        : 'investigating';
 
   const result = {
     title,
@@ -226,7 +243,7 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     events: [
       event('action', 'player', plan.summary || '玩家执行了一组行动', texts.slice(0, 3)),
       ...addedClues.map((clueId) => event('clue', clueId, `新增线索：${clueId}`, [], 'player')),
-      event('state_change', 'time', '墙上的电子钟往后跳了一小段；走廊里的动静比刚才更靠近房门。', ['电子钟', '走廊声']),
+      event('state_change', 'time', compressedTime ? '一连串动作被压缩在短短几分钟内完成；电子钟只往后跳了一小格。' : '墙上的电子钟往后跳了一小段；走廊里的动静比刚才更靠近房门。', ['电子钟', '走廊声']),
     ],
   } satisfies Omit<RuleResult, 'state'>;
   pushEntry(state, result);

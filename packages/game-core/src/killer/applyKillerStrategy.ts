@@ -3,6 +3,10 @@ import { cloneGameState } from '../state/createInitialState';
 import { scoreRun } from '../scoring/scoreRun';
 import { event } from '../narration/buildNarrationContext';
 
+function pickVariant<T>(items: T[], seed: number) {
+  return items[Math.abs(seed) % items.length];
+}
+
 function pushEntry(state: GameState, result: Omit<RuleResult, 'state'>) {
   const entry: StoryLogEntry = {
     id: `killer-log-${state.run}-${state.minute}-${Math.random().toString(36).slice(2, 8)}`,
@@ -37,12 +41,20 @@ export function applyKillerStrategy(current: GameState, strategy: KillerStrategy
 
   switch (strategy.type) {
     case 'phone_probe':
-      text = '陌生号码发来房东名义的信息，询问是否睡着、是否看见快递。';
+      text = pickVariant([
+        '陌生号码发来房东名义的信息，询问是否睡着、是否看见快递。',
+        '陌生号码只发来一句：“门口那个包裹你拿进去了吗？”发送时间卡在这一分钟。',
+        '手机屏幕亮起，陌生号码没有自报姓名，只说房东让他确认 503 门口的快递。',
+      ], state.minute);
       state.killerPhase = 'soft_pressure';
       break;
     case 'soft_knock':
     case 'landlord_excuse':
-      text = '门外出现两次轻敲；陈怀民用漏水检查作为开门理由。';
+      text = pickVariant([
+        '门外出现两次轻敲；陈怀民用漏水检查作为开门理由。',
+        '猫眼边缘掠过一小片深色袖口，随后门外有人压低声音说要核对住户登记。',
+        '走廊感应灯亮了一下，门外的人没有立刻敲门，只把“房东检查”四个字说得很轻。',
+      ], state.minute + state.threat);
       state.killerPhase = 'soft_pressure';
       break;
     case 'fake_police':

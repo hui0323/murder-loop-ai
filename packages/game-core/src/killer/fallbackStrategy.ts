@@ -1,5 +1,16 @@
 import type { GameState, KillerStrategy } from '@murder-loop-ai/shared';
 
+function recentlyUsed(state: GameState, type: KillerStrategy['type'], windowSize = 5) {
+  const recent = state.log.slice(-windowSize);
+  return recent.some((entry) => entry.title.includes(type) || entry.text.includes(type) || (
+    type === 'phone_probe' && entry.text.includes('是否睡着') && entry.text.includes('快递')
+  ));
+}
+
+function wasPhoneProbeUsed(state: GameState) {
+  return state.log.some((entry) => entry.text.includes('是否睡着') && entry.text.includes('快递'));
+}
+
 export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
   const k = state.killerKnowledge;
 
@@ -80,7 +91,7 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
-  if (!k.suspectsPlayerIsAlert && state.minute < 23 * 60 + 28) {
+  if (!k.suspectsPlayerIsAlert && state.minute < 23 * 60 + 28 && state.killerPhase === 'confirming_package' && !wasPhoneProbeUsed(state)) {
     return {
       id: `killer-${Date.now()}`,
       type: 'phone_probe',
@@ -113,12 +124,23 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
+  if (!recentlyUsed(state, 'landlord_excuse')) {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'landlord_excuse',
+      title: '房东借口靠近',
+      rationale: '温和试探仍然是低风险方式。',
+      visibleToPlayer: true,
+      risk: 'medium',
+    };
+  }
+
   return {
     id: `killer-${Date.now()}`,
-    type: 'landlord_excuse',
-    title: '房东借口靠近',
-    rationale: '温和试探仍然是低风险方式。',
+    type: 'wait_for_fatigue',
+    title: '走廊短暂停顿',
+    rationale: '最近已经用过房东借口，改用沉默和位置变化制造压力，避免重复。',
     visibleToPlayer: true,
-    risk: 'medium',
+    risk: 'low',
   };
 }
