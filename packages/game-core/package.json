@@ -1,0 +1,20 @@
+{
+  "name": "@murder-loop-ai/game-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@murder-loop-ai/shared": "0.1.0",
+    "@murder-loop-ai/ai-contracts": "0.1.0",
+    "@murder-loop-ai/content": "0.1.0",
+    "xstate": "^5.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,111 @@
+import type { GameState, KillerStrategy, RuleResult, StoryLogEntry } from '@murder-loop-ai/shared';
+import { cloneGameState } from '../state/createInitialState';
+import { scoreRun } from '../scoring/scoreRun';
+import { event } from '../narration/buildNarrationContext';
+
+function pushEntry(state: GameState, result: Omit<RuleResult, 'state'>) {
+  const entry: StoryLogEntry = {
+    id: `killer-log-${state.run}-${state.minute}-${Math.random().toString(36).slice(2, 8)}`,
+    run: state.run,
+    minute: state.minute,
+      title: result.title,
+      text: result.text,
+      tone: result.tone,
+      channel: result.tone === 'system' ? 'system' : 'ambient',
+    };
+  state.log.push(entry);
+}
+
+function end(state: GameState, ending: NonNullable<GameState['ending']>, title: string, text: string): RuleResult {
+  state.ending = ending;
+  state.phase = 'death';
+  state.score = scoreRun(state);
+  const result = { title, text, tone: 'death', addedClues: [], timePassed: 0, threatDelta: 0, events: [event('ending', ending, text, [title])] } as Omit<RuleResult, 'state'>;
+  pushEntry(state, result);
+  return { ...result, state };
+}
+
+export function applyKillerStrategy(current: GameState, strategy: KillerStrategy): RuleResult {
+  const state = cloneGameState(current);
+  let title = strategy.title;
+  let text = '门外暂时没有新的可见动作；楼道里的底噪仍压在门缝外。';
+  let threatDelta = strategy.risk === 'high' ? 10 : strategy.risk === 'medium' ? 5 : 1;
+
+  if (state.ending) {
+    return { title: '对抗结束', text: '这一轮已经结束。', tone: 'system', addedClues: [], timePassed: 0, threatDelta: 0, events: [event('ending', 'loop', '这一轮已经结束。')], state };
+  }
+
+  switch (strategy.type) {
+    case 'phone_probe':
+      text = '陌生号码发来房东名义的信息，询问是否睡着、是否看见快递。';
+      state.killerPhase = 'soft_pressure';
+      break;
+    case 'soft_knock':
+    case 'landlord_excuse':
+      text = '门外出现两次轻敲；陈怀民用漏水检查作为开门理由。';
+      state.killerPhase = 'soft_pressure';
+      break;
+    case 'fake_police':
+      state.phase = 'false_police_arrived';
+      state.killerPhase = 'deception';
+      text = '门外有人自称派出所民警，要求开门配合，但身份尚未核实。';
+      break;
+    case 'spare_key_entry':
+      if (!state.room.front_door.state.locked && !state.room.front_door.state.barricaded) {
+        return end(state, 'default_murder', '锁芯转动', '锁芯响起来的时候，我先以为是自己听错了。那声音太轻，像有人用指甲碰了一下金属。紧接着，门把手往下压。门缝里漏进来一线楼道的白光，我还没来得及后退，一个人已经用肩膀顶住门板。没有争吵，没有威胁，只有熟练到近乎安静的动作。');
+      }
+      text = '锁芯被尝试拨动；门的加固阻止了直接进入，但暴露了防备状态。';
+      break;
+    case 'window_route':
+      if (!state.room.window.state.locked && state.threat >= 55) {
+        return end(state, 'window_route_death', '窗外有人', '窗帘没有完全合上。雨声里，一只手从窗沿下方摸上来，指节被雨水泡得发白。我终于明白，门不是唯一入口。可这个念头出现得太晚，晚到我只能看见玻璃上自己的倒影被另一个影子覆盖。');
+      }
+      text = '窗外雨棚有轻微刮擦声，窗沿下方的雨水被蹭出一道断痕。';
+      break;
+    case 'framing_pressure':
+      state.killerPhase = 'framing';
+      text = '陌生号码开始用“私藏违禁品”的后果施压，逼我把包裹交出去或开门解释。';
+      break;
+    case 'power_cut':
+      threatDelta = 8;
+      state.killerPhase = 'deception';
+      text = '室内供电短暂中断；电表箱方向出现轻微金属声。';
+      break;
+    case 'lure_linyue':
+      threatDelta = 7;
+      state.killerPhase = 'deception';
+      text = '林越收到可疑引导：有人试图让他上楼登记。';
+      break;
+    case 'fake_neighbor':
+      threatDelta = 6;
+      state.killerPhase = 'soft_pressure';
+      text = '隔壁方向有人声要求查看漏水，位置避开猫眼正面。';
+      break;
+    case 'fake_callback':
+      threatDelta = 9;
+      state.killerPhase = 'deception';
+      text = '本地座机号码来电，自称官方回拨，但背景声音异常单一。';
+      break;
+    case 'wait_for_fatigue':
+      threatDelta = 3;
+      text = '门外长时间安静；电梯井偶尔传来一声很轻的金属回响。';
+      break;
+    case 'retreat':
+      threatDelta = -6;
+      text = '门外脚步声撤离到楼梯间；本次尝试暂时中止。';
+      break;
+  }
+
+  state.threat = Math.max(0, Math.min(100, state.threat + threatDelta));
+  const result = {
+    title,
+    text,
+    tone: 'threat',
+    addedClues: [],
+    timePassed: 0,
+    threatDelta,
+    events: [event('threat', strategy.type, text, [strategy.title], strategy.visibleToPlayer ? 'player' : 'hidden')],
+  } as Omit<RuleResult, 'state'>;
+  pushEntry(state, result);
+  return { ...result, state };
+}
