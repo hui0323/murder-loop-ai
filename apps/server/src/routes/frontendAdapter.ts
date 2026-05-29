@@ -96,6 +96,29 @@ function hasMessageReply(context: NarrationContext) {
   return context.events.some((event) => event.subject === 'message_reply');
 }
 
+function actionOnlyContext(context: NarrationContext, playerResult: RuleResult): NarrationContext {
+  return {
+    ...context,
+    events: playerResult.events,
+    forbiddenFacts: [
+      ...context.forbiddenFacts,
+      '行动回应只写玩家动作的直接结果，不能写下一波敲门、脚步、断电、来电或陌生号码回复。',
+    ],
+  };
+}
+
+function ambientOnlyContext(context: NarrationContext, killerResult: RuleResult): NarrationContext {
+  const ambientEvents = context.events.filter((event) => !['action', 'clue'].includes(event.kind));
+  return {
+    ...context,
+    events: ambientEvents.length ? ambientEvents : killerResult.events,
+    forbiddenFacts: [
+      ...context.forbiddenFacts,
+      '环境播报只写外部环境和暗线反馈，不能复述玩家刚刚做了什么，也不能替玩家总结行动。',
+    ],
+  };
+}
+
 async function chooseKillerStrategyForFrontend(state: GameState, plan?: ActionPlan, blackboard = createTurnBlackboard('', state)): Promise<KillerStrategy> {
   const coordinated = replyAwareKillerStrategy(plan);
   if (coordinated) {
@@ -131,6 +154,7 @@ async function chooseKillerStrategyForFrontend(state: GameState, plan?: ActionPl
 }
 
 async function narrateActionForFrontend(context: NarrationContext, playerResult: RuleResult, killerResult: RuleResult, state: GameState, blackboard = createTurnBlackboard('', state)): Promise<Narration> {
+  const narrationContext = actionOnlyContext(context, playerResult);
   const system = [
       '你是《23:47》的“行动回应”作者。只写玩家这次动作的落地结果，不写下一波环境推进。',
       '你只能使用 narrationContext.events 里的事实。不要新增证据，不改变时间、生死、NPC 状态，不让角色突然进场。',
@@ -144,7 +168,7 @@ async function narrateActionForFrontend(context: NarrationContext, playerResult:
   if (hasMessageReply(context)) {
     blackboard.warnings.push('action narrator bypassed for message_reply; deterministic action narration used to prevent cross-agent drift.');
     const narration = verifyNarration(fallback, fallback, blackboard, 'actionNarration');
-    const score = await scoreNarrationWithDirector({ slot: 'action', narration, context, playerResult, killerResult, state });
+    const score = await scoreNarrationWithDirector({ slot: 'action', narration, context: narrationContext, playerResult, killerResult, state });
     blackboard.directorScores.push(score);
     return narration;
   }
@@ -152,7 +176,7 @@ async function narrateActionForFrontend(context: NarrationContext, playerResult:
   const ai = await completeRoleJson(
     'narrator',
     system,
-    { narrationContext: context, playerResult, killerResult, state },
+    { narrationContext, playerResult, state },
     { temperature: 0.72 },
   ).catch(() => null);
   const parsed = NarrationSchema.safeParse(ai);
@@ -161,20 +185,20 @@ async function narrateActionForFrontend(context: NarrationContext, playerResult:
     blackboard.warnings.push('actionNarration AI failed schema validation; scored fallback narration instead.');
     blackboard.artifacts.actionNarration = fallback;
   }
-  let score = await scoreNarrationWithDirector({ slot: 'action', narration, context, playerResult, killerResult, state });
+  let score = await scoreNarrationWithDirector({ slot: 'action', narration, context: narrationContext, playerResult, killerResult, state });
   blackboard.directorScores.push(score);
 
   if (score.verdict === 'rewrite') {
     const rewrite = await completeRoleJson(
       'narrator',
       `${system}\n\n你正在根据剧情导演评分器重写。必须修复导演意见，不要解释重写过程。`,
-      { narrationContext: context, playerResult, killerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
+      { narrationContext, playerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
       { temperature: 0.68 },
     ).catch(() => null);
     const reparsed = NarrationSchema.safeParse(rewrite);
     if (reparsed.success) {
       narration = verifyNarration(reparsed.data, fallback, blackboard, 'actionNarration');
-      score = await scoreNarrationWithDirector({ slot: 'action', narration, context, playerResult, killerResult, state });
+      score = await scoreNarrationWithDirector({ slot: 'action', narration, context: narrationContext, playerResult, killerResult, state });
       blackboard.directorScores.push({ ...score, source: 'ai_rewrite' });
     }
   }
@@ -183,6 +207,7 @@ async function narrateActionForFrontend(context: NarrationContext, playerResult:
 }
 
 async function narrateAmbientForFrontend(context: NarrationContext, playerResult: RuleResult, killerResult: RuleResult, state: GameState, blackboard = createTurnBlackboard('', state)): Promise<Narration> {
+  const narrationContext = ambientOnlyContext(context, killerResult);
   const system = [
       '你是《23:47》的“环境播报/暗线镜头”。只写门外、楼道、手机、时间、来电、灯光、窗外等环境变化。',
       '不要复述玩家动作细节，不要写玩家心理，不要解释凶手计划。你只呈现玩家能直接感知的现象。',
@@ -195,7 +220,7 @@ async function narrateAmbientForFrontend(context: NarrationContext, playerResult
   if (hasMessageReply(context)) {
     blackboard.warnings.push('ambient narrator bypassed for message_reply; deterministic ambient narration used to prevent invented footsteps or knocking.');
     const narration = verifyNarration(fallback, fallback, blackboard, 'ambientNarration');
-    const score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context, playerResult, killerResult, state });
+    const score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context: narrationContext, playerResult, killerResult, state });
     blackboard.directorScores.push(score);
     return narration;
   }
@@ -203,7 +228,7 @@ async function narrateAmbientForFrontend(context: NarrationContext, playerResult
   const ai = await completeRoleJson(
     'narrator',
     system,
-    { narrationContext: context, playerResult, killerResult, state },
+    { narrationContext, killerResult, state },
     { temperature: 0.78 },
   ).catch(() => null);
   const parsed = NarrationSchema.safeParse(ai);
@@ -212,20 +237,20 @@ async function narrateAmbientForFrontend(context: NarrationContext, playerResult
     blackboard.warnings.push('ambientNarration AI failed schema validation; scored fallback narration instead.');
     blackboard.artifacts.ambientNarration = fallback;
   }
-  let score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context, playerResult, killerResult, state });
+  let score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context: narrationContext, playerResult, killerResult, state });
   blackboard.directorScores.push(score);
 
   if (score.verdict === 'rewrite') {
     const rewrite = await completeRoleJson(
       'narrator',
       `${system}\n\n你正在根据剧情导演评分器重写。必须修复导演意见，不要解释重写过程。`,
-      { narrationContext: context, playerResult, killerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
+      { narrationContext, killerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
       { temperature: 0.72 },
     ).catch(() => null);
     const reparsed = NarrationSchema.safeParse(rewrite);
     if (reparsed.success) {
       narration = verifyNarration(reparsed.data, fallback, blackboard, 'ambientNarration');
-      score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context, playerResult, killerResult, state });
+      score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context: narrationContext, playerResult, killerResult, state });
       blackboard.directorScores.push({ ...score, source: 'ai_rewrite' });
     }
   }

@@ -80,25 +80,26 @@ export default function App() {
       const result = (await response.json()) as FrontendResolveResponse;
       const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
 
-      const nextState: GameState = {
-        ...state,
-        isParsing: false,
-        actionConfirmation: null,
-        time: result.time ?? state.time,
-        location: result.location ?? state.location,
-        phase: result.phase ?? state.phase,
-        clues: result.clues ?? state.clues,
-        coreState: result.coreState ?? state.coreState,
-        ending: result.ending ?? state.ending,
-        deathTitle: result.deathTitle ?? state.deathTitle,
-        deathSummary: result.deathSummary ?? state.deathSummary,
-        deathMethod: result.deathMethod ?? state.deathMethod,
-        coordination: result.coordination ?? state.coordination,
-        storyLog: [...state.storyLog, ...resultLog],
-      };
-
-      persistFrontendState(nextState);
-      setState(nextState);
+      setState(prev => {
+        const nextState: GameState = {
+          ...prev,
+          isParsing: false,
+          actionConfirmation: null,
+          time: result.time ?? prev.time,
+          location: result.location ?? prev.location,
+          phase: result.phase ?? prev.phase,
+          clues: result.clues ?? prev.clues,
+          coreState: result.coreState ?? prev.coreState,
+          ending: result.ending ?? prev.ending,
+          deathTitle: result.deathTitle ?? prev.deathTitle,
+          deathSummary: result.deathSummary ?? prev.deathSummary,
+          deathMethod: result.deathMethod ?? prev.deathMethod,
+          coordination: result.coordination ?? prev.coordination,
+          storyLog: [...prev.storyLog, ...resultLog],
+        };
+        persistFrontendState(nextState);
+        return nextState;
+      });
 
       if (result.ending && result.ending !== state.ending) {
         setEndingCinematic({

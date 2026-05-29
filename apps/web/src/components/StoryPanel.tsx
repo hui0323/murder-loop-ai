@@ -44,8 +44,9 @@ export function StoryPanel({ log }: StoryPanelProps) {
               )}
               
               {node.type === 'player_input' && (
-                <div className="max-w-[80%] bg-zinc-900 border border-white/5 rounded-xl px-5 py-3 text-zinc-300 font-sans text-sm md:text-base shadow-lg mr-2">
-                   "{node.content}"
+                <div className="max-w-[82%] bg-zinc-900/90 border border-white/10 rounded-lg px-5 py-3 text-zinc-200 font-sans text-sm md:text-base shadow-lg mr-2">
+                  <div className="font-mono text-[10px] text-zinc-500 tracking-[0.18em] uppercase mb-1">你发出</div>
+                  <div className="leading-relaxed whitespace-pre-wrap">“{node.content}”</div>
                 </div>
               )}
 
