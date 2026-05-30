@@ -172,13 +172,11 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {activeClue && (
-        <ClueRevealModal
-          clue={activeClue}
-          onClose={handleClueModalClose}
-          read={activeClueId ? !!readClues[activeClueId] : false}
-        />
-      )}
+      <ClueRevealModal
+        clue={activeClue}
+        open={Boolean(activeClue)}
+        onClose={handleClueModalClose}
+      />
 
       <div className="flex flex-col h-screen bg-[#08080a] overflow-hidden text-zinc-200">
       <Header
