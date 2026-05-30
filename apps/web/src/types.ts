@@ -73,4 +73,14 @@ export interface GameState {
   deathMethod?: string | null;
   coordination?: CoordinationState;
   recap?: string;
+  sidebar?: {
+    phone: { battery: number; recording: boolean; muted: boolean; newMessages: string[] };
+    threat: { level: number; trend: string; label: string };
+    timeLabel: string;
+    phaseLabel: string;
+    moodSignal: string;
+    npcStatus: Array<{ name: string; status: string; risk: string }>;
+    roomStatus: Array<{ item: string; state: string; icon: string }>;
+    newClues: Array<{ id: string; name: string; detail: string }>;
+  };
 }

@@ -18,63 +18,19 @@ import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNar
 // ============================================================================
 
 
-// 随机环境事件池
-const RANDOM_AMBIENT_EVENTS = [
-  '走廊感应灯突然亮了，门缝下的光变强了一瞬，又暗下去',
-  '远处电梯井传来金属缆绳的轻微回响',
-  '隔壁传来电视碎音——这个时间还有人醒着',
-  '老旧水管发出一声沉闷的撞击',
-  '窗外雨声中夹进一声极短促的汽车喇叭',
-  '楼道里有什么东西被风吹倒了——塑料瓶滚过地面',
-  '手机屏幕自动亮了一下：运营商发来的垃圾短信',
-  '门缝飘进来一丝烟味——楼道里有人在抽烟',
-  '雨水忽然变大，密集地砸在雨棚上',
-  '对门猫眼亮了一瞬——有人在对面往外看',
-];
 
-const PHYSICAL_SIGNALS = [
-  '胃里空空的，搬家那天你只吃了一个面包',
-  '嘴唇有点干，水瓶还在行李箱里没拿出来',
-  '长时间保持同一姿势，肩膀开始发酸',
-  '指尖有点凉，空调出风口正对着你',
-  '眼睛盯着手机屏幕太久，开始有点发涩',
-  '连续几小时的紧张让你的太阳穴微微跳动',
-];
-
-function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function buildPlotContext(state: GameState, plan?: ActionPlan): string {
-  const recentLog = state.log.slice(-6);
-  const playerActions = recentLog.filter(l => l.channel === 'action').map(l => '- ' + l.title + ': ' + l.text.slice(0, 60));
-  const killerActions = recentLog.filter(l => l.channel === 'ambient').map(l => '- ' + l.title + ': ' + l.text.slice(0, 60));
-  const clues = state.clues.slice(-5).map(c => clueBook[c]?.title ?? c);
-  const idleTurns = state.log.filter(l => l.channel === 'action')
-    .filter(l => l.text.includes('等待') || l.text.includes('保持原位') || l.text.includes('停在原地')).length;
+  const recentTitles = state.log.slice(-4).map(l => l.title).join(' / ');
   const minsToDeadline = 1427 - state.minute;
-  const battery = (state.room?.phone?.state as Record<string, unknown>)?.battery as number ?? 60;
-  const elapsedMin = state.minute - 1380;
-  const randomEvent = pickRandom(RANDOM_AMBIENT_EVENTS);
-  const physicalSignal = elapsedMin > 10 ? pickRandom(PHYSICAL_SIGNALS) : '';
-
   return [
-    '=== 剧情状态 ===',
-    '第 ' + state.run + ' 轮，时间 23:' + String(state.minute % 60).padStart(2, '0') + '，距离23:47还有' + minsToDeadline + '分钟',
-    '手机电量: ' + battery + '% | 线索: ' + (clues.join(', ') || '无') + ' | 闲置回合: ' + idleTurns,
-    '玩家近期行动:',
-    ...(playerActions.length ? playerActions : ['- 尚无']),
-    '暗线近期事件:',
-    ...(killerActions.length ? killerActions : ['- 尚无']),
-    '本回合输入: "' + (plan?.summary ?? '未知') + '"',
-    '=== 玩家身体状态 ===',
-    physicalSignal || '你暂时感觉还好，但时间在流逝。',
-    '=== 随机环境事件（选一个融入本回合叙事） ===',
-    randomEvent,
-    '=== 导演指示 ===',
-    '叙事必须有实质推进。环境细节每回合必须变化。',
-    '如果玩家连续等待，通过环境事件和身体状态变化来打破停滞——饿、冷、累、渴都是真实的压力。',
-    '用具体的感官细节(声音、光线、气味、温度、触感)营造紧张感，不要用抽象词。',
+    '时间23:' + String(state.minute % 60).padStart(2, '0') + '，距23:47还有' + minsToDeadline + '分钟',
+    '最近回合: ' + (recentTitles || '游戏开始'),
+    '本回合玩家要做: ' + (plan?.summary || '未知'),
+    '避免重复最近出现过的施压方式。玩家在回复消息时优先message_reply。',
   ].join('\n');
 }
+
 
 function generateRecap(state: GameState): string {
   const memories = state.memory.filter(m => !m.id.startsWith('checkpoint-'));
@@ -146,14 +102,11 @@ async function narrateActionAi(
 ): Promise<Narration> {
   const { createFallbackActionNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackActionNarration(playerResult);
+  // 只用 narrationContext 里的真实事件，不加额外的剧情上下文
   const system = [
-    buildPlotContext(state),
-    '',
-    '你是行动回应作者。只写玩家动作的落地结果，不写环境推进。',
-    '根据上面的剧情状态，写出玩家本次行动的具体结果。',
-    '文风：悬疑网文，有推进有钩子。写门锁、猫眼、手机冷光、纸箱气味、脚步距离、手上动作。',
-    '必须查看 narrationContext.recentLog，严格避免复述最近两回合出现过的具体描述。',
-    '如果剧情状态里出现了相似的玩家行动，必须写出不同的细节和角度。',
+    '你是行动回应作者。核心任务：把 narrationContext.events 里的事实写成悬疑小说段落。',
+    '必须严格基于 events 里的内容写作。玩家做了什么，你就写什么。不要自己编造玩家没做的事。',
+    '文风：悬疑网文，具体克制。写门锁、猫眼、手机冷光、纸箱气味、脚步距离、手上动作。',
     '220-520 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,
@@ -171,14 +124,10 @@ async function narrateAmbientAi(
   const { createFallbackAmbientNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackAmbientNarration(playerResult, killerResult);
   const system = [
-    buildPlotContext(state),
-    '',
     '你是环境播报/暗线镜头。只写门外、楼道、手机、窗外等外部变化。',
-    '根据上面的剧情状态和导演指示，写出本回合的环境推进。',
-    '绝对禁止：如果上回合出现过的细节（灯光、电表箱、雨声、窗帘、楼道、脚步声），这回合必须写完全不同的内容。',
-    '可用的替代元素：敲门声、短信提示音、窗外人影、钥匙插入锁孔、对门邻居开门、楼下警笛、手机震动、对讲机电流声、电梯停靠声、消防楼梯脚步',
-    '每次只推进一个压力点。安静和停顿最多持续一回合就必须有新的事件发生。',
-    '语言：悬疑网文收尾钩子，具体克制，最后一句压住下一步选择。',
+    '基于 killerResult.events 和 stateSnapshot 写环境推进。',
+    '不要重复上一回合出现过的具体细节（灯光闪烁、电表箱、雨声变化、窗帘飘动等）。',
+    '每次只推进一个明确的外部事件。语言克制，最后一句留钩子。',
     '90-240 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,

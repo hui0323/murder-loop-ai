@@ -187,6 +187,21 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         texts.push('核实身份：要求对方报单位和警号，并等待官方回拨确认。');
         break;
       case 'escape':
+        // 窗户路线：检查窗户/找消防梯/逃生路线
+        if (action.target === 'window') {
+          state.room.window.inspected = true;
+          state.room.window.state.checked = true;
+          if (state.room.window.state.locked) {
+            title = '窗户锁着';
+            texts.push('窗户路线：窗锁扣紧，暂时打不开。窗外是雨棚，距离地面至少四层楼高。雨声很响，雨棚上的积水在滴。');
+          } else {
+            state.room.window.state.opened = true;
+            title = '窗户可以打开';
+            texts.push('窗户路线：窗锁一拧就开，冷风和雨丝灌了进来。窗外是一个铁皮雨棚，踩上去会响——但它确实通向走廊尽头另一侧的窗户。如果有人在外面，这可能是另一条路。');
+            addClue(state, addedClues, 'window_escape');
+          }
+          break;
+        }
         // 冲出门/逃跑 → 等同于开门，但意图更激烈
         state.room.front_door.state.opened = true;
         state.player.stress = clamp(state.player.stress + 15);

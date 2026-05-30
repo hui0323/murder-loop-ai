@@ -6,6 +6,14 @@ interface SidebarProps {
   clues: Clue[];
   coordination?: CoordinationState;
   recap?: string;
+  sidebar?: {
+    phone: { battery: number; recording: boolean; muted: boolean; newMessages: string[] };
+    threat: { level: number; trend: string; label: string };
+    timeLabel: string;
+    phaseLabel: string;
+    moodSignal: string;
+    roomStatus: Array<{ item: string; state: string; icon: string }>;
+  };
 }
 
 function slotLabel(slot: 'action' | 'ambient') {
@@ -21,7 +29,7 @@ function scoreColor(total: number) {
 // 故事背景
 const STORY_BG = `你叫沈知夏，今天刚搬进青荷公寓503室。行李箱还堆在门边，桌上有一个被拆开了一半的纸箱——不是你买的。旧书、药板、一张写着"503"的数字纸条。你不认识寄件人，也不知道这个包裹为什么会在这里。在第一轮中，你于23:47被杀。死亡后你带着模糊的记忆碎片回到了23:00。你不知道是谁杀了你，也不知道为什么——只知道你必须活下来，找到答案。`;
 
-export function Sidebar({ clues, coordination, recap }: SidebarProps) {
+export function Sidebar({ clues, coordination, recap, sidebar }: SidebarProps) {
   const directorScores = coordination?.directorScores ?? [];
   const [showMemories, setShowMemories] = useState(false);
 
@@ -64,18 +72,24 @@ export function Sidebar({ clues, coordination, recap }: SidebarProps) {
         </div>
 
         <div className="space-y-6">
-          {/* Status block */}
+          {/* Status block — 动态数据 */}
           <div className="space-y-3">
             <h3 className="text-xs font-mono text-zinc-600 uppercase border-b border-white/5 pb-2">自身状态</h3>
             <ul className="text-sm font-sans space-y-2 text-zinc-400">
               <li className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
-                后脑钝痛，可能有轻微脑震荡
+                <div className={`w-1.5 h-1.5 rounded-full ${(sidebar?.threat?.level ?? 0) >= 60 ? 'bg-rose-500' : (sidebar?.threat?.level ?? 0) >= 40 ? 'bg-amber-500' : 'bg-zinc-500'}`} />
+                {sidebar?.threat?.label ?? '相对平静'}
               </li>
               <li className="flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
-                刚搬家，体力较差
+                {sidebar?.phaseLabel ?? '循环开始'}
               </li>
+              {sidebar?.moodSignal && (
+                <li className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  <span className="text-xs text-zinc-500 italic">{sidebar.moodSignal}</span>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -123,11 +137,18 @@ export function Sidebar({ clues, coordination, recap }: SidebarProps) {
                 </div>
               ))}
 
-              <div className="bg-zinc-900/30 border border-white/5 border-dashed rounded-lg p-3 opacity-60">
+              <div className="bg-zinc-900/30 border border-white/5 border-dashed rounded-lg p-3">
                 <div className="flex items-center gap-2 text-zinc-400 font-sans text-sm mb-1">
-                  <Smartphone className="w-3.5 h-3.5" /> 手机
+                  <Smartphone className="w-3.5 h-3.5" />
+                  手机
+                  {sidebar?.phone.recording && <span className="text-[10px] font-mono bg-rose-500/20 text-rose-400 px-1 py-0.5 rounded">REC</span>}
                 </div>
-                <p className="text-xs text-zinc-600 font-sans">电量 42%，无未读消息。</p>
+                <p className="text-xs text-zinc-500 font-sans">
+                  电量 {(sidebar?.phone.battery ?? 60)}%
+                  {sidebar?.phone.recording ? ' · 录音中' : ''}
+                  {sidebar?.phone.muted ? ' · 已静音' : ''}
+                  {(sidebar?.phone.newMessages?.length ?? 0) > 0 ? ` · ${sidebar!.phone.newMessages.length}条新消息` : ''}
+                </p>
               </div>
             </div>
           </div>

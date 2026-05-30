@@ -96,6 +96,7 @@ export default function App() {
           deathMethod: result.deathMethod ?? prev.deathMethod,
           coordination: result.coordination ?? prev.coordination,
           recap: result.recap ?? prev.recap,
+          sidebar: result.sidebar ?? prev.sidebar,
           storyLog: [...prev.storyLog, ...resultLog],
         };
         persistFrontendState(nextState);
@@ -190,7 +191,7 @@ export default function App() {
 
         {/* Desktop Sidebar */}
         <div className="hidden lg:block shrink-0 relative z-30">
-          <Sidebar clues={state.clues} coordination={state.coordination} />
+          <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} />
         </div>
 
         {/* Mobile Sidebar Frame */}
@@ -203,7 +204,7 @@ export default function App() {
               transition={{ type: "spring", bounce: 0, duration: 0.4 }}
               className="absolute inset-y-0 right-0 w-80 z-40 lg:hidden shadow-2xl bg-[#08080a]"
             >
-               <Sidebar clues={state.clues} coordination={state.coordination} />
+               <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} />
             </motion.div>
           )}
         </AnimatePresence>
