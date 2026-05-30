@@ -204,6 +204,8 @@ export interface GameState {
   phoneBattery: number;
   /** 手机是否可用（电量 > 0 且未被损坏） */
   phoneFunctional: boolean;
+  /** Hidden resolver: once real police are confirmed, the background minute when they arrive. */
+  policeArrivalMinute?: number;
   /** Plot Director 生成的剧情指导——下一回合注入给叙事/杀手 AI */
   plotGuidance?: string;
 }

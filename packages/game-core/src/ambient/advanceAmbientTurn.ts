@@ -2,6 +2,7 @@ import type { GameState, RuleResult } from '@murder-loop-ai/shared';
 import { cloneGameState } from '../state/createInitialState';
 import { event } from '../narration/buildNarrationContext';
 import { scoreRun } from '../scoring/scoreRun';
+import { ensurePoliceArrivalCountdown, isPoliceArrivalDue, resolvePoliceArrival } from '../rules/policeArrival';
 
 function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
@@ -15,6 +16,12 @@ export function advanceAmbientTurn(current: GameState): RuleResult {
   state.minute += timePassed;
   state.threat = clamp(state.threat + threatDelta);
   state.player.stress = clamp(state.player.stress + 2);
+  ensurePoliceArrivalCountdown(state);
+
+  if (isPoliceArrivalDue(state)) {
+    const policeResult = resolvePoliceArrival(state);
+    return { ...policeResult, state };
+  }
 
   const noEvidenceShared = !state.room.package.state.backedUp && !state.clues.some(c => c.id === 'linyue_has_photo') && !state.room.phone.state.recording;
   const noDefense = !state.room.front_door.state.barricaded && !state.room.window.state.locked;
@@ -38,7 +45,7 @@ export function advanceAmbientTurn(current: GameState): RuleResult {
     return { ...result, state };
   }
 
-  state.phase = state.policePhase !== 'not_contacted' ? 'police_called' : state.threat >= 48 ? 'killer_pressure' : 'investigating';
+  state.phase = state.policePhase === 'real_police_en_route' ? 'confrontation' : state.policePhase !== 'not_contacted' ? 'police_called' : state.threat >= 48 ? 'killer_pressure' : 'investigating';
 
   const result = {
     title: '时间继续走',

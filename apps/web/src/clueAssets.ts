@@ -3,6 +3,9 @@ export interface ClueAsset {
 }
 
 export const CLUE_ASSETS: Record<string, ClueAsset> = {
+  c1: {
+    imageUrl: new URL('../../../image/模糊的包裹.png', import.meta.url).href,
+  },
   wrong_package: {
     imageUrl: new URL('../../../image/模糊的包裹.png', import.meta.url).href,
   },

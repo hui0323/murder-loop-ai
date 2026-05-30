@@ -141,7 +141,6 @@ export default function App() {
   };
 
   const handleClueSelect = (clue: Clue) => {
-    if (!getClueAsset(clue.id)) return;
     setActiveClueId(clue.id);
   };
 

@@ -85,6 +85,18 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
   }
 
   const lastAction = state.log.slice().reverse().find((entry) => entry.channel === 'action');
+  if (state.policePhase === 'real_police_en_route') {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'direct_confrontation',
+      title: '最后施压',
+      rationale: '真警已经确认并在路上，陈怀民不再适合伪装权威，只会尝试最后一次现实施压或撤离。',
+      responseHint: '门外的人第一次失去耐心。他没有再装成警察，只压低声音让你撤回报警、交出包裹；楼道远处有真实的对讲机电流声逼近。',
+      visibleToPlayer: true,
+      risk: 'high',
+    };
+  }
+
   if (lastAction?.title.includes('房东在试探') || lastAction?.text.includes('发了出去')) {
     return {
       id: `killer-${Date.now()}`,

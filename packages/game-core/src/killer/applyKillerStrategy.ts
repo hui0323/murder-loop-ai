@@ -80,6 +80,12 @@ export function applyKillerStrategy(current: GameState, strategy: KillerStrategy
       state.killerPhase = 'deception';
       text = '门外有人自称派出所民警，要求开门配合，但身份尚未核实。';
       break;
+    case 'direct_confrontation':
+      threatDelta = 6;
+      state.phase = state.policePhase === 'real_police_en_route' ? 'confrontation' : state.phase;
+      state.killerPhase = 'exposed';
+      text = strategy.responseHint || '门外的人失去伪装，压低声音做最后一次威胁；楼道远处的真实动静正在逼近。';
+      break;
     case 'spare_key_entry':
       if (!state.room.front_door.state.locked && !state.room.front_door.state.barricaded) {
         return end(state, 'default_murder', '锁芯转动', '锁芯响起来的时候，我先以为是自己听错了。那声音太轻，像有人用指甲碰了一下金属。紧接着，门把手往下压。门缝里漏进来一线楼道的白光，我还没来得及后退，一个人已经用肩膀顶住门板。没有争吵，没有威胁，只有熟练到近乎安静的动作。');

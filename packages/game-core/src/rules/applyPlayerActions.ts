@@ -3,6 +3,7 @@ import { DEADLINE_MINUTE, type ActionPlan, type ClueRecord, type GameState, type
 import { cloneGameState } from '../state/createInitialState';
 import { scoreRun } from '../scoring/scoreRun';
 import { event } from '../narration/buildNarrationContext';
+import { ensurePoliceArrivalCountdown, isPoliceArrivalDue, resolvePoliceArrival } from './policeArrival';
 
 function addClue(state: GameState, added: ClueRecord[], clueId: string) {
   if (state.clues.some(c => c.id === clueId)) return;
@@ -69,6 +70,7 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
   const texts: string[] = [];
   let title = '行动开始';
   let tone: RuleResult['tone'] = 'neutral';
+  let phoneChargedThisTurn = false;
 
   if (state.ending) {
     return { title: '循环已经结束', text: '这一轮已经抵达结局。', tone: 'system', addedClues, timePassed: 0, threatDelta, events: [event('ending', 'loop', '这一轮已经抵达结局。')], state };
@@ -285,6 +287,10 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         } else if (itemId === 'phone_charger') {
           state.phoneBattery = Math.min(61, state.phoneBattery + 30);
           state.phoneFunctional = true;
+          phoneChargedThisTurn = true;
+          if (state.room.phone?.state) {
+            (state.room.phone.state as any).battery = state.phoneBattery;
+          }
           texts.push('充电器插上——屏幕亮起，电量图标从红色跳回绿色。');
           title = '电量回升';
         } else {
@@ -331,12 +337,22 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     return markEnding(state, 'default_murder', '23:47', '电子钟跳到 23:47。门外的人不再敲门，锁芯却轻轻响了一声。我那一瞬间才明白，自己还是慢了一步：证据没有送到足够远的地方，门窗也没有把危险挡在外面。黑暗从门缝里挤进来，像上一轮死亡时一样熟悉。');
   }
 
-  if (state.policePhase === 'dispatch_pending' && state.clues.some(c => c.id === 'police_verified') && state.clues.some(c => c.id === 'package_photo')) {
+  if (state.policePhase === 'dispatch_pending' && state.clues.some(c => c.id === 'police_verified')) {
     state.policePhase = 'real_police_en_route';
+  }
+
+  ensurePoliceArrivalCountdown(state);
+
+  if (isPoliceArrivalDue(state) && !state.ending) {
+    const policeResult = resolvePoliceArrival(state);
+    pushEntry(state, policeResult);
+    return { ...policeResult, state };
   }
 
   state.phase = state.minute >= DEADLINE_MINUTE - 5
     ? 'pre_2347_countdown'
+    : state.policePhase === 'real_police_en_route'
+      ? 'confrontation'
     : state.policePhase !== 'not_contacted'
       ? 'police_called'
       : state.threat >= 48
@@ -358,8 +374,10 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
   } satisfies Omit<RuleResult, 'state'>;
   // ---- 手机电量管理 ----
   if (state.phoneFunctional) {
-    const perMin = state.room.phone?.state?.recording ? 3 : 1.5;
-    state.phoneBattery = Math.max(0, state.phoneBattery - Math.round(perMin * timePassed));
+    if (!phoneChargedThisTurn) {
+      const perMin = state.room.phone?.state?.recording ? 3 : 1.5;
+      state.phoneBattery = Math.max(0, state.phoneBattery - Math.round(perMin * timePassed));
+    }
     // 同步到 room.phone.state 供旧逻辑读取
     if (state.room.phone?.state) {
       (state.room.phone.state as any).battery = state.phoneBattery;

@@ -52,17 +52,21 @@ export function ClueItem({ clue, unread, onSelect }: ClueItemProps) {
   return (
     <button
       type="button"
-      disabled={!hasImage}
       onClick={() => onSelect?.(clue)}
       className={`w-full rounded-lg border p-3 text-left transition-colors focus:outline focus:outline-1 focus:outline-white/40 ${
         unread
           ? 'border-amber-200/20 bg-zinc-900/70 shadow-[inset_2px_0_0_rgba(251,191,36,.35)]'
           : 'border-white/5 bg-zinc-900/50'
-      } ${hasImage ? 'hover:border-white/15 hover:bg-zinc-900/80' : 'cursor-default'}`}
+      } hover:border-white/15 hover:bg-zinc-900/80`}
     >
       <div className="mb-1 flex items-start justify-between gap-3">
         <span className="font-sans text-sm text-zinc-200">{clue.name}</span>
-        {unread && <NewBadge />}
+        <span className="flex shrink-0 items-center gap-1">
+          {!hasImage && (
+            <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">TEXT</span>
+          )}
+          {unread && <NewBadge />}
+        </span>
       </div>
       <p className="text-xs leading-relaxed text-zinc-500">{clue.description}</p>
     </button>

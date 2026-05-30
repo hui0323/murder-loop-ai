@@ -7,8 +7,8 @@ import {
 } from '@murder-loop-ai/game-core';
 import {
   minuteLabel,
-  type ActionPlan, type GameState, type KillerStrategy, type Narration,
-  type NarrationContext, type RuleResult, type StoryLogEntry, type TurnResolution,
+  type ActionPlan, type ClueRecord, type GameState, type KillerStrategy, type Narration,
+  type NarrationContext, type RuleEvent, type RuleResult, type StoryLogEntry, type TurnResolution,
 } from '@murder-loop-ai/shared';
 import { completeRoleJson } from '../ai/openaiClient';
 import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNarration } from '../ai/turnCoordinator';
@@ -247,7 +247,7 @@ async function narrateActionAi(
     '   杀手死亡 → 加 "killerKilled": true',
     '   不要让玩家在明显已经死了的情况下还能继续操作。',
     '9. 文风：第一人称限知视角，写可观察事实（声音/光线/距离/动作），不写"我害怕"。',
-    '   220-520 中文字符。只输出 JSON：{"title":"...","text":"..."}。',
+    '   220-520 中文字符。只输出 JSON：{"title":"...","text":"..."}；如果本段自然产生关键新信息，可以额外带 1 个 clue 字段：{"id":"dyn_xxx","title":"线索标题","detail":"具体情报","weight":6}。',
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,
     { narrationContext: context, playerResult, state }, { temperature: 0.75 });
@@ -286,7 +286,7 @@ async function narrateAmbientAi(
     '5. 【绝对禁止】不要写电表箱、供电中断、灯光闪烁、电压不稳。这些已经用过太多次了。',
     '   找新的环境事件：水管声、隔壁动静、楼下对讲机、窗外车灯、手机信号干扰、对讲机杂音...',
     '6. 最后一句留钩子。让玩家想知道接下来会怎样。',
-    '7. 90-240 中文字符。只输出 JSON：{"title":"...","text":"..."}。',
+    '7. 90-240 中文字符。只输出 JSON：{"title":"...","text":"..."}；如果外部事件带来关键新信息，可以额外带 1 个 clue 字段：{"id":"dyn_xxx","title":"线索标题","detail":"具体情报","weight":6}。',
     '',
     ambientContext,
   ].join('\n');
@@ -330,6 +330,136 @@ function toFrontendClues(state: GameState) {
   }));
 }
 
+function coerceClues(rawClues: unknown, fallback: GameState): GameState['clues'] {
+  if (!Array.isArray(rawClues)) return fallback.clues;
+  return rawClues.flatMap((clue, index) => {
+    if (typeof clue === 'object' && clue !== null && 'id' in clue && 'title' in clue && 'detail' in clue) {
+      return [{
+        ...(clue as GameState['clues'][number]),
+        discoveredAt: (clue as GameState['clues'][number]).discoveredAt ?? { run: fallback.run, minute: fallback.minute },
+        isPersistent: (clue as GameState['clues'][number]).isPersistent ?? true,
+        source: (clue as GameState['clues'][number]).source ?? 'ai_generated',
+        weight: (clue as GameState['clues'][number]).weight ?? 6,
+      }];
+    }
+
+    if (typeof clue !== 'string') return [];
+    const template = clueBook[clue];
+    if (template) {
+      return [{
+        ...template,
+        discoveredAt: { run: fallback.run, minute: fallback.minute },
+      }];
+    }
+
+    return [{
+      id: normalizeDynamicClueId(clue || `legacy_clue_${index}`),
+      title: clue || `旧线索 ${index + 1}`,
+      detail: '这是旧版本存档中的线索，已自动转为文字情报。',
+      source: 'ai_generated' as const,
+      weight: 4,
+      discoveredAt: { run: fallback.run, minute: fallback.minute },
+      isPersistent: true,
+    }];
+  });
+}
+
+function coerceGameState(rawState: unknown): GameState {
+  const fallback = createInitialGameState();
+  if (!rawState || typeof rawState !== 'object') return fallback;
+
+  const raw = rawState as Partial<GameState>;
+  const state: GameState = {
+    ...fallback,
+    ...raw,
+    player: {
+      ...fallback.player,
+      ...(raw.player ?? {}),
+    },
+    room: raw.room ?? fallback.room,
+    killerKnowledge: {
+      ...fallback.killerKnowledge,
+      ...(raw.killerKnowledge ?? {}),
+    },
+    memory: Array.isArray(raw.memory) ? raw.memory : fallback.memory,
+    log: Array.isArray(raw.log) ? raw.log : fallback.log,
+    clues: coerceClues(raw.clues, { ...fallback, run: raw.run ?? fallback.run, minute: raw.minute ?? fallback.minute }),
+    killerStatus: raw.killerStatus ?? fallback.killerStatus,
+    playerHolding: raw.playerHolding ?? fallback.playerHolding,
+    combatTriggered: raw.combatTriggered ?? fallback.combatTriggered,
+    phoneBattery: raw.phoneBattery ?? ((raw.room?.phone?.state?.battery as number | undefined) ?? fallback.phoneBattery),
+    phoneFunctional: raw.phoneFunctional ?? fallback.phoneFunctional,
+  };
+
+  return state;
+}
+
+function normalizeDynamicClueId(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48) || 'key_info';
+}
+
+function addDynamicClue(state: GameState, clue: Omit<ClueRecord, 'source' | 'discoveredAt' | 'isPersistent'>) {
+  const id = normalizeDynamicClueId(clue.id);
+  if (state.clues.some((existing) => existing.id === id || existing.title === clue.title)) return;
+
+  state.clues.push({
+    ...clue,
+    id,
+    source: 'ai_generated',
+    discoveredAt: { run: state.run, minute: state.minute },
+    isPersistent: true,
+  });
+}
+
+function addNarrationClues(state: GameState, narrations: Array<Narration | undefined>) {
+  for (const narration of narrations) {
+    if (!narration?.clue) continue;
+    addDynamicClue(state, {
+      id: narration.clue.id,
+      title: narration.clue.title,
+      detail: narration.clue.detail,
+      weight: narration.clue.weight,
+    });
+  }
+}
+
+function isKeyEvent(event: RuleEvent) {
+  if (event.visibility !== 'player') return false;
+  if (event.kind === 'clue' || event.kind === 'ending') return false;
+  if (event.kind === 'state_change' && ['time', 'phone_battery'].includes(event.subject)) return false;
+  return ['message', 'threat', 'state_change'].includes(event.kind);
+}
+
+function addEventClues(state: GameState, events: RuleEvent[]) {
+  for (const event of events.filter(isKeyEvent)) {
+    const title = event.kind === 'message'
+      ? '通讯异常'
+      : event.kind === 'threat'
+        ? '外部压力变化'
+        : '现场状态变化';
+    const specificTitle = event.sensoryHints[0] ? `${title}：${event.sensoryHints[0]}` : title;
+    addDynamicClue(state, {
+      id: `dyn_${state.run}_${state.minute}_${event.subject}`,
+      title: specificTitle.slice(0, 28),
+      detail: event.summary,
+      weight: event.kind === 'threat' ? 8 : 6,
+    });
+  }
+}
+
+function addTurnDynamicClues(resolution: TurnResolution) {
+  const state = resolution.finalState;
+  addNarrationClues(state, [resolution.actionNarration, resolution.ambientNarration, resolution.narration]);
+  addEventClues(state, [
+    ...resolution.playerResult.events,
+    ...resolution.killerResult.events,
+  ]);
+}
+
 function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
   if (entry.channel === 'action')
     return { id: entry.id, type: 'action_result', content: `${entry.title ? `${entry.title}: ` : ''}${entry.text}`, timestamp: minuteLabel(entry.minute) };
@@ -346,7 +476,7 @@ export async function harnessTurnRoute(app: FastifyInstance) {
   app.post('/api/harness/turn', async (request) => {
     const body = request.body as { input?: string; state?: GameState };
     const input = body.input?.trim() ?? '';
-    const rawState = body.state ?? createInitialGameState();
+    const rawState = coerceGameState(body.state);
 
     // 死亡状态自动回退——无论有没有输入，先复活
     let state = rawState;
@@ -392,21 +522,9 @@ export async function harnessTurnRoute(app: FastifyInstance) {
         resolution.finalState.killerStatus = 'dead';
         resolution.finalState.combatTriggered = true;
       }
-      // AI 动态线索提取——叙事 AI 在 JSON 中附带的线索自动加入 state
-      for (const narration of [resolution.actionNarration, resolution.ambientNarration]) {
-        if (narration?.clue && !resolution.finalState.clues.some(c => c.id === narration.clue!.id)) {
-          resolution.finalState.clues.push({
-            id: narration.clue.id,
-            title: narration.clue.title,
-            detail: narration.clue.detail,
-            source: 'ai_generated',
-            weight: narration.clue.weight,
-            discoveredAt: { run: resolution.finalState.run, minute: resolution.finalState.minute },
-            isPersistent: true,
-          });
-        }
-      }
     }
+
+    addTurnDynamicClues(resolution);
 
     const sidebarAgent = harness.registry.getAgent('sidebar');
     const sidebar = sidebarAgent

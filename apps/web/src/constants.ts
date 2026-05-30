@@ -14,8 +14,8 @@ export const INITIAL_STATE: GameState = {
   deathMethod: null,
   clues: [
     {
-      id: 'c1',
-      name: '奇怪的包裹',
+      id: 'wrong_package',
+      name: '标记模糊的包裹',
       description: '写着模糊的 "5-03"，里面是一本被掏空的旧书。',
       status: 'new',
     }
