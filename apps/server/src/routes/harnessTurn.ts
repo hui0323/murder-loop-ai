@@ -17,25 +17,62 @@ import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNar
 // 剧情上下文 & 前情提要
 // ============================================================================
 
+
+// 随机环境事件池
+const RANDOM_AMBIENT_EVENTS = [
+  '走廊感应灯突然亮了，门缝下的光变强了一瞬，又暗下去',
+  '远处电梯井传来金属缆绳的轻微回响',
+  '隔壁传来电视碎音——这个时间还有人醒着',
+  '老旧水管发出一声沉闷的撞击',
+  '窗外雨声中夹进一声极短促的汽车喇叭',
+  '楼道里有什么东西被风吹倒了——塑料瓶滚过地面',
+  '手机屏幕自动亮了一下：运营商发来的垃圾短信',
+  '门缝飘进来一丝烟味——楼道里有人在抽烟',
+  '雨水忽然变大，密集地砸在雨棚上',
+  '对门猫眼亮了一瞬——有人在对面往外看',
+];
+
+const PHYSICAL_SIGNALS = [
+  '胃里空空的，搬家那天你只吃了一个面包',
+  '嘴唇有点干，水瓶还在行李箱里没拿出来',
+  '长时间保持同一姿势，肩膀开始发酸',
+  '指尖有点凉，空调出风口正对着你',
+  '眼睛盯着手机屏幕太久，开始有点发涩',
+  '连续几小时的紧张让你的太阳穴微微跳动',
+];
+
+function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+
 function buildPlotContext(state: GameState, plan?: ActionPlan): string {
   const recentLog = state.log.slice(-6);
-  const playerActions = recentLog.filter(l => l.channel === 'action').map(l => `- ${l.title}: ${l.text.slice(0, 60)}`);
-  const killerActions = recentLog.filter(l => l.channel === 'ambient').map(l => `- ${l.title}: ${l.text.slice(0, 60)}`);
+  const playerActions = recentLog.filter(l => l.channel === 'action').map(l => '- ' + l.title + ': ' + l.text.slice(0, 60));
+  const killerActions = recentLog.filter(l => l.channel === 'ambient').map(l => '- ' + l.title + ': ' + l.text.slice(0, 60));
   const clues = state.clues.slice(-5).map(c => clueBook[c]?.title ?? c);
+  const idleTurns = state.log.filter(l => l.channel === 'action')
+    .filter(l => l.text.includes('等待') || l.text.includes('保持原位') || l.text.includes('停在原地')).length;
+  const minsToDeadline = 1427 - state.minute;
+  const battery = (state.room?.phone?.state as Record<string, unknown>)?.battery as number ?? 60;
+  const elapsedMin = state.minute - 1380;
+  const randomEvent = pickRandom(RANDOM_AMBIENT_EVENTS);
+  const physicalSignal = elapsedMin > 10 ? pickRandom(PHYSICAL_SIGNALS) : '';
 
   return [
-    `=== 剧情状态 ===`,
-    `第 ${state.run} 轮，游戏时间 23:${String(state.minute % 60).padStart(2, '0')}`,
-    `阶段: ${state.phase} | 凶手阶段: ${state.killerPhase} | 威胁: ${state.threat}/100`,
-    `线索: ${clues.join(', ') || '无'}`,
-    `玩家近期行动:`,
+    '=== 剧情状态 ===',
+    '第 ' + state.run + ' 轮，时间 23:' + String(state.minute % 60).padStart(2, '0') + '，距离23:47还有' + minsToDeadline + '分钟',
+    '手机电量: ' + battery + '% | 线索: ' + (clues.join(', ') || '无') + ' | 闲置回合: ' + idleTurns,
+    '玩家近期行动:',
     ...(playerActions.length ? playerActions : ['- 尚无']),
-    `暗线近期事件:`,
+    '暗线近期事件:',
     ...(killerActions.length ? killerActions : ['- 尚无']),
-    `本回合玩家输入: "${plan?.summary ?? '未知'}"`,
-    `=== 导演指示 ===`,
-    `剧情必须向前推进。上回合出现过的环境细节（灯光、电表箱、雨声、窗帘、楼道）这回合必须有本质变化或完全不出现。`,
-    `每次回应只推进一个明确的压力点，不要原地踏步。`,
+    '本回合输入: "' + (plan?.summary ?? '未知') + '"',
+    '=== 玩家身体状态 ===',
+    physicalSignal || '你暂时感觉还好，但时间在流逝。',
+    '=== 随机环境事件（选一个融入本回合叙事） ===',
+    randomEvent,
+    '=== 导演指示 ===',
+    '叙事必须有实质推进。环境细节每回合必须变化。',
+    '如果玩家连续等待，通过环境事件和身体状态变化来打破停滞——饿、冷、累、渴都是真实的压力。',
+    '用具体的感官细节(声音、光线、气味、温度、触感)营造紧张感，不要用抽象词。',
   ].join('\n');
 }
 
@@ -91,11 +128,10 @@ async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<Ki
     '',
     '你是暗线导演，负责陈怀民与楼道环境的下一步压力推进。',
     '根据上面的剧情状态和导演指示，制定本回合的暗线行动。',
-    '陈怀民是谨慎的现实罪犯，但也是被逼到墙角的困兽。包裹证据泄露=转运链完了。',
-    '压力递进路线：短信试探 → 轻敲门 → 房东借口 → 断电 → 假警察 → 假回拨 → 备用钥匙 → 窗外路线 → 暴力闯入',
-    '每个阶段持续1-2回合后必须升级。不能反复横跳。',
-    '如果玩家已经拍照/备份/联系外界，陈怀民应该更焦虑、更激进。',
-    '如果玩家在回复消息，优先 message_reply。',
+    '陈怀民是一个谨慎但越来越焦虑的现实罪犯。包裹证据足以毁掉他的转运链。',
+    '可选策略：phone_probe(短信)、soft_knock(轻敲)、landlord_excuse(房东借口)、power_cut(断电)、fake_police(假警察)、fake_callback(假回拨)、spare_key_entry(备用钥匙)、window_route(窗外路线)、lure_linyue(引诱林越)、framing_pressure(证据施压)、retreat(撤退)、message_reply(对话回复)、wait_for_fatigue(沉默)',
+    '选择策略时参考剧情状态里的闲置回合数、随机环境事件、玩家身体状态。',
+    '如果玩家连续闲置不行动，必须主动推进。如果玩家在回复消息，优先 message_reply。',
     '只输出 JSON，必须符合 KillerStrategySchema。',
   ].join('\n'), { visibleState: visible, allowedShape: fallback, plan }, { temperature: 0.7 });
   if (!ai) throw new Error('killer AI returned null');

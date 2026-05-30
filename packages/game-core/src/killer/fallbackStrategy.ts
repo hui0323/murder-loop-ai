@@ -11,6 +11,19 @@ function wasPhoneProbeUsed(state: GameState) {
   return state.log.some((entry) => entry.text.includes('是否睡着') && entry.text.includes('快递'));
 }
 
+/** 统计连续无有效行动的回合数（wait/open_door 且无防御加固） */
+function countIdleTurns(state: GameState): number {
+  let count = 0;
+  for (let i = state.log.length - 1; i >= 0; i--) {
+    const entry = state.log[i];
+    if (entry.channel !== 'action') continue;
+    const isIdle = entry.text.includes('等待') || entry.text.includes('保持原位') || entry.text.includes('停在原地')
+      || entry.text.includes('没有新的主动') || entry.text.includes('时间继续走');
+    if (isIdle) { count++; } else { break; }
+  }
+  return count;
+}
+
 export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
   const k = state.killerKnowledge;
 
