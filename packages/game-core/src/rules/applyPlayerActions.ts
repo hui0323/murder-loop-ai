@@ -197,8 +197,7 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
           } else {
             state.room.window.state.opened = true;
             title = '窗户可以打开';
-            texts.push('窗户路线：窗锁一拧就开，冷风和雨丝灌了进来。窗外是一个铁皮雨棚，踩上去会响——但它确实通向走廊尽头另一侧的窗户。如果有人在外面，这可能是另一条路。');
-            addClue(state, addedClues, 'window_escape');
+            texts.push('窗户路线：窗锁一拧就开，冷风和雨丝灌了进来。窗外是一个铁皮雨棚，踩上去会响——但它确实通向走廊尽头另一侧的窗户。');
           }
           break;
         }
