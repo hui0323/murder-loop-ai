@@ -10,13 +10,13 @@ function clamp(value: number, min = 0, max = 100) {
 export function advanceAmbientTurn(current: GameState): RuleResult {
   const state = cloneGameState(current);
   const timePassed = 1;
-  const threatDelta = state.threat >= 55 ? 9 : state.threat >= 42 ? 6 : 3;
+  const threatDelta = state.threat >= 55 ? 12 : state.threat >= 42 ? 8 : 5;
 
   state.minute += timePassed;
   state.threat = clamp(state.threat + threatDelta);
   state.player.stress = clamp(state.player.stress + 2);
 
-  const noEvidenceShared = !state.room.package.state.backedUp && !state.clues.includes('linyue_has_photo') && !state.room.phone.state.recording;
+  const noEvidenceShared = !state.room.package.state.backedUp && !state.clues.some(c => c.id === 'linyue_has_photo') && !state.room.phone.state.recording;
   const noDefense = !state.room.front_door.state.barricaded && !state.room.window.state.locked;
 
   if (state.threat >= 76 && noDefense && noEvidenceShared) {

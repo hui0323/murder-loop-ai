@@ -41,7 +41,7 @@ export function createTurnBlackboard(input: string, state: GameState): TurnBlack
       beforeMinute: state.minute,
       beforePhase: state.phase,
       beforeThreat: state.threat,
-      knownClues: [...state.clues],
+      knownClues: state.clues.map(c => c.id),
     },
     artifacts: {},
     directorScores: [],

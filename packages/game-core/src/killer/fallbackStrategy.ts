@@ -38,6 +38,52 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
+  // ---- 杀手状态守卫（新） ----
+  // 杀手已死/被捕 → 无法继续施压
+  if (state.killerStatus === 'dead' || state.killerStatus === 'arrested') {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'retreat',
+      title: '威胁消失',
+      rationale: '陈怀民已无法继续施加压力。',
+      visibleToPlayer: false,
+      risk: 'low',
+    };
+  }
+  // 杀手已逃跑
+  if (state.killerStatus === 'fled') {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'retreat',
+      title: '房东已逃离',
+      rationale: '陈怀民逃离了公寓，后续压力仅来自环境。',
+      visibleToPlayer: false,
+      risk: 'low',
+    };
+  }
+  // 杀手受重伤 → 更绝望/激进的策略
+  if (state.killerStatus === 'injured') {
+    return {
+      id: `killer-${Date.now()}`,
+      type: state.threat > 60 ? 'spare_key_entry' : 'retreat',
+      title: state.threat > 60 ? '孤注一掷' : '负伤撤退',
+      rationale: state.threat > 60 ? '受伤后陈怀民选择赌上一切。' : '受伤后陈怀民暂时撤退。',
+      visibleToPlayer: true,
+      risk: 'high',
+    };
+  }
+  // 杀手无力反抗
+  if (state.killerStatus === 'incapacitated') {
+    return {
+      id: `killer-${Date.now()}`,
+      type: 'retreat',
+      title: '无力继续',
+      rationale: '陈怀民已无力继续施加压力。',
+      visibleToPlayer: false,
+      risk: 'low',
+    };
+  }
+
   const lastAction = state.log.slice().reverse().find((entry) => entry.channel === 'action');
   if (lastAction?.title.includes('房东在试探') || lastAction?.text.includes('发了出去')) {
     return {
@@ -51,7 +97,7 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
-  if (state.policePhase !== 'not_contacted' && !state.clues.includes('police_verified') && state.threat >= 55) {
+  if (state.policePhase !== 'not_contacted' && !state.clues.some(c => c.id === 'police_verified') && state.threat >= 55) {
     return {
       id: `killer-${Date.now()}`,
       type: 'fake_callback',
@@ -73,29 +119,30 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
-  if (state.threat >= 52 && !state.room.phone.state.muted) {
+  // 高压阶段 → 不再用电表箱，直接施压
+  if (state.threat >= 58 && state.player.stress >= 35 && !state.room.front_door.state.barricaded) {
     return {
       id: `killer-${Date.now()}`,
-      type: 'power_cut',
-      title: '电表箱响了一下',
-      rationale: '玩家还依赖手机和灯光，陈怀民可以先制造环境失控。',
+      type: 'spare_key_entry',
+      title: '钥匙入锁孔',
+      rationale: '耐心耗尽，直接尝试备用钥匙进入。',
       visibleToPlayer: true,
-      risk: 'medium',
+      risk: 'high',
     };
   }
 
-  if (state.threat >= 58 && state.player.stress >= 35) {
+  if (state.threat >= 52 && !state.room.window.state.locked) {
     return {
       id: `killer-${Date.now()}`,
-      type: 'wait_for_fatigue',
-      title: '长时间沉默',
-      rationale: '玩家精神压力升高时，等待本身也能成为攻击策略。',
+      type: 'window_route',
+      title: '窗外有人',
+      rationale: '窗户没锁，陈怀民考虑替代入口。',
       visibleToPlayer: false,
-      risk: 'medium',
+      risk: 'high',
     };
   }
 
-  if (state.policePhase !== 'not_contacted' && !state.clues.includes('police_verified')) {
+  if (state.policePhase !== 'not_contacted' && !state.clues.some(c => c.id === 'police_verified')) {
     return {
       id: `killer-${Date.now()}`,
       type: 'fake_police',
@@ -139,7 +186,7 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
-  if (state.clues.includes('package_photo') && !state.clues.includes('linyue_has_photo')) {
+  if (state.clues.some(c => c.id === 'package_photo') && !state.clues.some(c => c.id === 'linyue_has_photo')) {
     return {
       id: `killer-${Date.now()}`,
       type: 'framing_pressure',

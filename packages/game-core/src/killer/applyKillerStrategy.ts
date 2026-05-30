@@ -39,6 +39,24 @@ export function applyKillerStrategy(current: GameState, strategy: KillerStrategy
     return { title: '对抗结束', text: '这一轮已经结束。', tone: 'system', addedClues: [], timePassed: 0, threatDelta: 0, events: [event('ending', 'loop', '这一轮已经结束。')], state };
   }
 
+  // ---- 杀手状态守卫 ----
+  if (state.killerStatus === 'dead' || state.killerStatus === 'arrested' || state.killerStatus === 'fled') {
+    return {
+      title: '威胁消失', text: '陈怀民已无法继续施加压力。', tone: 'system',
+      addedClues: [], timePassed: 0, threatDelta: -10,
+      events: [event('state_change', 'killer_gone', '陈怀民已无法继续施加压力。')],
+      state,
+    };
+  }
+  if (state.killerStatus === 'incapacitated') {
+    return {
+      title: '无力继续', text: '陈怀民已无力反抗。', tone: 'system',
+      addedClues: [], timePassed: 0, threatDelta: -5,
+      events: [event('state_change', 'killer_down', '陈怀民已无力反抗。')],
+      state,
+    };
+  }
+
   switch (strategy.type) {
     case 'phone_probe':
       text = pickVariant([
@@ -79,9 +97,10 @@ export function applyKillerStrategy(current: GameState, strategy: KillerStrategy
       text = '陌生号码开始用“私藏违禁品”的后果施压，逼我把包裹交出去或开门解释。';
       break;
     case 'power_cut':
+      // 不再使用电表箱——改用更直接的压力
       threatDelta = 8;
-      state.killerPhase = 'deception';
-      text = '室内供电短暂中断；电表箱方向出现轻微金属声。';
+      state.killerPhase = 'forced_entry';
+      text = '门外的脚步不再试探。门把手被用力压下——锁舌发出短促的金属呻吟。';
       break;
     case 'lure_linyue':
       threatDelta = 7;

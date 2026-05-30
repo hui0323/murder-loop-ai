@@ -22,7 +22,8 @@ export function rewindAfterDeath(state: GameState): GameState {
         text: state.log[state.log.length - 1]?.text || firstDeathMemory.text,
       },
     ].slice(-8);
-    next.clues = [...state.clues]; // 保留所有线索
+    // 保留跨循环线索（isPersistent: true）
+    next.clues = state.clues.filter(c => c.isPersistent);
     next.room = state.room;        // 保留房间状态
     next.player = state.player;    // 保留玩家状态
     next.log = [
@@ -39,7 +40,7 @@ export function rewindAfterDeath(state: GameState): GameState {
     return next;
   }
 
-  // 标准重启：从零开始
+  // 标准重启：从零开始，但保留跨循环线索
   const next = createInitialGameState();
   next.run = state.run + 1;
   next.memory = [
@@ -51,14 +52,17 @@ export function rewindAfterDeath(state: GameState): GameState {
       text: state.log[state.log.length - 1]?.text || firstDeathMemory.text,
     },
   ].slice(-8);
-  next.clues = state.clues.filter((id) => ['wrong_package', 'door_scratch', 'police_verified'].includes(id));
+  // 只保留跨循环标记的线索（AI 动态生成的线索通常 isPersistent: true）
+  next.clues = state.clues.filter(c => c.isPersistent);
   next.log = [
     {
       id: `rewind-${next.run}`,
       run: next.run,
       minute: START_MINUTE,
       title: `第 ${next.run} 次醒来`,
-      text: '雨声重新贴上窗户。电子钟回到 23:00。房间没有变，但死亡前的声音留了下来：门锁、手机、旧书味，还有那句”东西呢？”。',
+      text: state.clues.length > 0
+        ? '雨声重新贴上窗户。电子钟回到 23:00。房间没有变，但上一轮发现的线索碎片还留在记忆里——像没做完的梦。'
+        : '雨声重新贴上窗户。电子钟回到 23:00。房间没有变，但死亡前的声音留了下来：门锁、手机、旧书味，还有那句"东西呢？"。',
       tone: 'memory',
       channel: 'memory',
     },

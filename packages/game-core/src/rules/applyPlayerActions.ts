@@ -1,14 +1,21 @@
-import { clueBook } from '@murder-loop-ai/content';
-import { DEADLINE_MINUTE, type ActionPlan, type GameState, type RuleResult, type StoryLogEntry } from '@murder-loop-ai/shared';
+import { clueBook, createClueFromTemplate } from '@murder-loop-ai/content';
+import { DEADLINE_MINUTE, type ActionPlan, type ClueRecord, type GameState, type RuleResult, type StoryLogEntry } from '@murder-loop-ai/shared';
 import { cloneGameState } from '../state/createInitialState';
 import { scoreRun } from '../scoring/scoreRun';
 import { event } from '../narration/buildNarrationContext';
 
-function addClue(state: GameState, added: string[], clueId: string) {
-  if (!state.clues.includes(clueId)) {
-    state.clues.push(clueId);
-    added.push(clueId);
-  }
+function addClue(state: GameState, added: ClueRecord[], clueId: string) {
+  if (state.clues.some(c => c.id === clueId)) return;
+  const clue = createClueFromTemplate(clueId, state.run, state.minute);
+  if (!clue) return;  // clueId not in clueBook — skip (AI-generated clues are added directly)
+  state.clues.push(clue);
+  added.push(clue);
+}
+
+/** 直接添加一条 ClueRecord（用于 AI 动态生成的线索） */
+export function addDynamicClue(state: GameState, clue: ClueRecord): void {
+  if (state.clues.some(c => c.id === clue.id)) return;
+  state.clues.push(clue);
 }
 
 function clamp(value: number, min = 0, max = 100) {
@@ -49,14 +56,14 @@ function markEnding(state: GameState, ending: NonNullable<GameState['ending']>, 
   state.ending = ending;
   state.phase = ending.includes('survived') || ending === 'perfect_truth' || ending === 'escaped_without_truth' || ending === 'framed_survivor' ? 'survived' : 'death';
   state.score = scoreRun(state);
-  const result = { title, text, tone: state.phase === 'death' ? 'death' : 'win', addedClues: [], timePassed: 0, threatDelta: 0, events: [event('ending', ending, text, [title])] } as Omit<RuleResult, 'state'>;
+  const result = { title, text, tone: state.phase === 'death' ? 'death' : 'win', addedClues: [] as ClueRecord[], timePassed: 0, threatDelta: 0, events: [event('ending', ending, text, [title])] } as Omit<RuleResult, 'state'>;
   
   return { ...result, state };
 }
 
 export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleResult {
   const state = cloneGameState(current);
-  const addedClues: string[] = [];
+  const addedClues: ClueRecord[] = [];
   let complexityCost = 0;
   let threatDelta = 0;
   const texts: string[] = [];
@@ -227,6 +234,64 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         title = '雨声变清楚';
         texts.push('等待观察：保持原位，降低主动暴露；继续监听门外和楼道变化。');
         break;
+      case 'attack': {
+        // 叙事驱动的战斗——规则引擎只验证前置条件，AI 判断结果
+        const weaponId = (action as any).weaponId as string | undefined;
+        // 检查武器是否在房间中可及（通过 playerHolding 或房间物品描述）
+        const weaponAvailable = weaponId
+          ? (state.playerHolding === weaponId || state.room[weaponId])
+          : false;
+        if (!weaponAvailable && weaponId) {
+          // 玩家声称的武器不可及 → 叙事柔化，不阻止行动
+          texts.push(`攻击（武器不可及）：你声称使用${weaponId}，但手边没有。叙事 AI 将揭示这一事实。`);
+          (action as any).weaponNotFound = true;
+        } else {
+          state.combatTriggered = true;
+          // 武器可及 → 规则引擎标记战斗，AI 决定结果
+          state.playerHolding = state.playerHolding || weaponId || 'fists';
+          texts.push(`${action.method || '攻击'}：${action.raw}（战斗触发，AI 叙事判断结果）`);
+        }
+        title = '战斗爆发';
+        tone = 'threat';
+        break;
+      }
+      case 'pick_up': {
+        const itemId = (action as any).itemId as string | undefined;
+        if (itemId) {
+          state.playerHolding = itemId;
+          addClue(state, addedClues, 'weapon_found');
+          texts.push(`拾取：${itemId}——现在在你手中。`);
+          title = '手指握紧了';
+        } else {
+          texts.push('你扫视了一圈，不确定要拿什么。');
+        }
+        break;
+      }
+      case 'use_item': {
+        const itemId = (action as any).itemId as string | undefined;
+        if (itemId === 'tape' && state.playerHolding === 'tape') {
+          state.room.front_door.state.barricaded = true;
+          texts.push('使用胶带：门缝被胶带封住，加固了临时防御。');
+          title = '胶带嘶啦一声';
+        } else if (itemId === 'first_aid_kit') {
+          state.player.stress = clamp(state.player.stress - 15);
+          if (state.player.injury !== 'none' && state.player.injury !== 'critical') {
+            const injuryOrder = ['none', 'minor', 'bleeding', 'leg_injured', 'critical'] as const;
+            const idx = injuryOrder.indexOf(state.player.injury as any);
+            if (idx > 0) state.player.injury = injuryOrder[idx - 1];
+          }
+          texts.push('使用急救包：伤口被简单处理，疼痛减轻了一些。');
+          title = '绷带的触感';
+        } else if (itemId === 'phone_charger') {
+          state.phoneBattery = Math.min(61, state.phoneBattery + 30);
+          state.phoneFunctional = true;
+          texts.push('充电器插上——屏幕亮起，电量图标从红色跳回绿色。');
+          title = '电量回升';
+        } else {
+          texts.push(`使用物品：${itemId || '未知'}——效果取决于具体物品。`);
+        }
+        break;
+      }
       default:
         // 不阻止任何行动——记录玩家意图，交给 AI 叙事判断
         title = action.method || action.intent;
@@ -241,10 +306,23 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
   state.minute += timePassed;
   state.threat = clamp(state.threat + threatDelta + (state.minute >= DEADLINE_MINUTE - 10 ? 4 : 0));
 
+  // ---- 战斗触发的结局检测（在 23:47 之前也可能结束） ----
+  if (state.combatTriggered && !state.ending) {
+    const hasEvidence = state.clues.some(c => c.id === 'package_photo') &&
+      (state.clues.some(c => c.id === 'linyue_has_photo') || state.room.phone.state.recording || state.room.package.state.backedUp);
+    if (state.killerStatus === 'dead' && hasEvidence) {
+      return markEnding(state, 'killer_dead_with_evidence', '不是你死，就是我活', '刀落在瓷砖上，声音比想象中轻。陈怀民的身体滑倒在地，手机从外套口袋里滑出来，屏幕还亮着——上面是他和"上游"的对话。你捡起手机，把录音和照片一起按下了发送。这一次，证据比你更早抵达外面。');
+    }
+    if (state.killerStatus === 'dead' && !hasEvidence) {
+      return markEnding(state, 'killer_dead_no_evidence', '门外的身体还有余温', '陈怀民不再动了。你靠着门框喘气，手指还在发抖。但当你低头看向自己空空的手机相册和没有发送的消息记录时，你意识到——你杀了一个人，但没有任何证据证明他该死。警笛声从远处传来，留给你的时间以秒计算。');
+    }
+  }
+
   if (state.minute >= DEADLINE_MINUTE && !state.ending) {
-    const hasEvidence = state.clues.includes('package_photo') && (state.clues.includes('linyue_has_photo') || state.room.phone.state.recording || state.room.package.state.backedUp);
+    const hasEvidence = state.clues.some(c => c.id === 'package_photo') &&
+      (state.clues.some(c => c.id === 'linyue_has_photo') || state.room.phone.state.recording || state.room.package.state.backedUp);
     const hasDefense = Boolean(state.room.front_door.state.barricaded) && Boolean(state.room.window.state.locked);
-    const policeTrusted = state.policePhase === 'real_police_en_route' || state.clues.includes('police_verified');
+    const policeTrusted = state.policePhase === 'real_police_en_route' || state.clues.some(c => c.id === 'police_verified');
 
     if (hasEvidence && hasDefense && policeTrusted) {
       return markEnding(state, 'survived_with_evidence', '23:47 没有吞掉我', '电子钟跳到 23:47 的时候，我几乎不敢眨眼。门外的人没有等到我开门，锁芯也没有再转动。录音、照片和官方回拨把这间屋子从孤岛变成了现场。我还活着，但我知道这不只是因为运气——是因为这一轮，我终于把证据送出了房间。');
@@ -253,7 +331,7 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     return markEnding(state, 'default_murder', '23:47', '电子钟跳到 23:47。门外的人不再敲门，锁芯却轻轻响了一声。我那一瞬间才明白，自己还是慢了一步：证据没有送到足够远的地方，门窗也没有把危险挡在外面。黑暗从门缝里挤进来，像上一轮死亡时一样熟悉。');
   }
 
-  if (state.policePhase === 'dispatch_pending' && state.clues.includes('police_verified') && state.clues.includes('package_photo')) {
+  if (state.policePhase === 'dispatch_pending' && state.clues.some(c => c.id === 'police_verified') && state.clues.some(c => c.id === 'package_photo')) {
     state.policePhase = 'real_police_en_route';
   }
 
@@ -274,14 +352,25 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
     threatDelta,
     events: [
       event('action', 'player', plan.summary || '玩家执行了一组行动', texts.slice(0, 3)),
-      ...addedClues.map((clueId) => event('clue', clueId, `新增线索：${clueId}`, [], 'player')),
+      ...addedClues.map((clue) => event('clue', clue.id, `新增线索：${clue.title}`, [], 'player')),
       event('state_change', 'time', compressedTime ? '一连串动作被压缩在短短几分钟内完成；电子钟只往后跳了一小格。' : '墙上的电子钟往后跳了一小段；走廊里的动静比刚才更靠近房门。', ['电子钟', '走廊声']),
     ],
   } satisfies Omit<RuleResult, 'state'>;
-  if (state.room.phone?.state) {
-    const perMin = state.room.phone.state.recording ? 3 : 1.5;
-    const bat: number = (state.room.phone.state as any).battery ?? 60;
-    (state.room.phone.state as any).battery = Math.max(0, bat - Math.round(perMin * timePassed));
+  // ---- 手机电量管理 ----
+  if (state.phoneFunctional) {
+    const perMin = state.room.phone?.state?.recording ? 3 : 1.5;
+    state.phoneBattery = Math.max(0, state.phoneBattery - Math.round(perMin * timePassed));
+    // 同步到 room.phone.state 供旧逻辑读取
+    if (state.room.phone?.state) {
+      (state.room.phone.state as any).battery = state.phoneBattery;
+    }
+    if (state.phoneBattery <= 0) {
+      state.phoneFunctional = false;
+      if (state.room.phone?.state) {
+        state.room.phone.state.recording = false;
+        state.room.phone.state.muted = true;
+      }
+    }
   }
   pushEntry(state, result);
   return { ...result, state };

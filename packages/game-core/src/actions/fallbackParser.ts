@@ -134,7 +134,107 @@ export function fallbackParseAction(input: string): ActionPlan {
   }
 
   if (includesAny(text, ['等', '等待', '听', '安静', '不动'])) {
-    actions.push(createAction(raw, 'wait', 'self', '等待并倾听变化', 0.75, 1, 0, 'medium'));
+    // 但如果同时有明确动作动词，不解析为 wait
+    if (!includesAny(text, ['追', '冲', '砍', '杀', '打', '刺', '捅', '砸', '逃', '跑', '开门', '拿', '捡'])) {
+      actions.push(createAction(raw, 'wait', 'self', '等待并倾听变化', 0.75, 1, 0, 'medium'));
+    }
+  }
+
+  // ---- 追击/冲刺（之前被误判为 wait 的核心 bug） ----
+  if (includesAny(text, ['追', '冲过去', '追上去', '追出去', '冲出门', '追他', '追她', '冲出去', '跑出去'])) {
+    actions.push(createAction(raw, 'escape', 'front_door', '冲出房门追击门外的人', 0.78, 2, 5, 'high'));
+  }
+
+  // ---- 攻击类（叙事驱动战斗） ----
+  if (includesAny(text, ['砍', '捅', '刺', '砸', '打他', '打她', '攻击', '搏斗', '杀', '干掉', '弄死', '开枪', '射杀', '射'])) {
+    let weaponId: string | undefined;
+    if (includesAny(text, ['枪', '开枪', '射', '射击', '子弹', '炸弹', '闪光弹', '手雷'])) {
+      warnings.push('你手边没有枪或爆炸物。这是普通出租屋，不是军火库。');
+    } else if (includesAny(text, ['刀', '厨刀', '厨房刀', '菜刀'])) {
+      weaponId = 'kitchen_knife';
+    } else if (includesAny(text, ['剪刀'])) {
+      weaponId = 'scissors';
+    } else if (includesAny(text, ['台灯', '灯'])) {
+      weaponId = 'desk_lamp';
+    } else if (includesAny(text, ['雨伞', '伞'])) {
+      weaponId = 'umbrella';
+    } else {
+      weaponId = 'fists';
+    }
+    const a = createAction(raw, 'attack', 'chen_huaimin',
+      weaponId ? `使用${weaponId}攻击陈怀民` : '徒手攻击',
+      weaponId && weaponId !== 'fists' ? 0.72 : 0.35, 2, weaponId ? 5 : 3, 'high');
+    (a as any).weaponId = weaponId;
+    actions.push(a);
+  }
+
+  // ---- 拾取物品 ----
+  if (includesAny(text, ['拿起', '捡起', '取出', '拿出', '翻出', '找到', '拎起', '抓起', '握起', '拿'])) {
+    let itemId: string | undefined;
+    if (includesAny(text, ['刀', '厨刀', '菜刀', '厨房'])) itemId = 'kitchen_knife';
+    else if (includesAny(text, ['剪刀'])) itemId = 'scissors';
+    else if (includesAny(text, ['台灯', '灯'])) itemId = 'desk_lamp';
+    else if (includesAny(text, ['雨伞', '伞'])) itemId = 'umbrella';
+    else if (includesAny(text, ['胶带', '透明胶', '封箱'])) itemId = 'tape';
+    else if (includesAny(text, ['急救包', '绷带', '药', '消毒'])) itemId = 'first_aid_kit';
+    else if (includesAny(text, ['充电器', '充电线', '充电'])) itemId = 'phone_charger';
+    else if (includesAny(text, ['打火机', '火机', '点火'])) itemId = 'lighter';
+    else if (includesAny(text, ['螺丝刀', '螺丝批', '改锥'])) itemId = 'screwdriver';
+    else if (includesAny(text, ['衣架', '铁丝', '衣挂'])) itemId = 'hanger';
+    else if (includesAny(text, ['镜子'])) itemId = 'mirror';
+    else if (includesAny(text, ['漂白水', '清洁剂', '消毒水', '氨水'])) itemId = 'bleach';
+    else if (includesAny(text, ['笔', '便签', '纸', '纸条'])) itemId = 'pen_paper';
+    else if (includesAny(text, ['报纸', '杂志'])) itemId = 'newspaper';
+    else if (includesAny(text, ['皮带', '腰带'])) itemId = 'belt';
+    else if (includesAny(text, ['手电', '手电筒', '电筒'])) itemId = 'flashlight';
+    if (itemId) {
+      const a = createAction(raw, 'pick_up', itemId, `拿起${itemId}`, 0.82, 1, 1, 'low');
+      (a as any).itemId = itemId;
+      actions.push(a);
+    }
+  }
+
+  // ---- 使用物品 ----
+  if (includesAny(text, ['用', '使用', '封住', '封门', '包扎', '处理伤口',
+    '充电', '插上', '手机没电', '点火', '烧', '照亮', '照',
+    '撬', '拧', '拆', '勾', '钩', '反射', '写', '记'])) {
+    let itemId: string | undefined;
+    if (includesAny(text, ['胶带', '封住', '封门', '贴'])) itemId = 'tape';
+    else if (includesAny(text, ['急救包', '包扎', '伤口', '绷带'])) itemId = 'first_aid_kit';
+    else if (includesAny(text, ['充电', '插上', '充电器', '手机没电'])) itemId = 'phone_charger';
+    else if (includesAny(text, ['打火机', '火', '烧', '点'])) itemId = 'lighter';
+    else if (includesAny(text, ['螺丝刀', '撬', '拧', '拆'])) itemId = 'screwdriver';
+    else if (includesAny(text, ['衣架', '铁丝', '勾', '钩'])) itemId = 'hanger';
+    else if (includesAny(text, ['镜子', '反射'])) itemId = 'mirror';
+    else if (includesAny(text, ['漂白水', '清洁剂', '消毒'])) itemId = 'bleach';
+    else if (includesAny(text, ['笔', '便签', '写', '记', '纸条'])) itemId = 'pen_paper';
+    else if (includesAny(text, ['报纸', '杂志', '塞'])) itemId = 'newspaper';
+    else if (includesAny(text, ['皮带', '腰带', '绑', '捆'])) itemId = 'belt';
+    else if (includesAny(text, ['手电', '照亮', '照'])) itemId = 'flashlight';
+    if (itemId) {
+      const a = createAction(raw, 'use_item', itemId, `使用${itemId}`, 0.84, 1, 1, 'low');
+      (a as any).itemId = itemId;
+      actions.push(a);
+    }
+  }
+
+  // ---- 智斗/陷阱/误导类 ----
+  if (includesAny(text, ['设陷阱', '绊线', '绊倒', '制造假象', '误导', '伪装', '假装',
+    '骗', '火警', '触发警报', '制造混乱', '声东击西', '调虎离山',
+    '引诱', '引开', '支开', '拖延时间', '争取时间'])) {
+    actions.push(createAction(raw, 'deceive', 'chen_huaimin', '用计策误导或拖延杀手', 0.76, 2, 2, 'medium'));
+  }
+
+  // ---- 搜身/搜尸体 ----
+  if (includesAny(text, ['搜身', '搜尸体', '翻口袋', '检查尸体', '看他身上', '他身上有什么'])) {
+    actions.push(createAction(raw, 'inspect', 'chen_huaimin', '搜索尸体上的物品和信息', 0.85, 2, 1, 'medium'));
+  }
+
+  // ---- 答非所问防护：有明确动作动词但没匹配到任何规则 ----
+  if (actions.length === 0 && includesAny(text, ['追', '冲', '砍', '杀', '打', '刺', '捅', '砸', '逃', '跑', '开门', '踹'])) {
+    // 宁可低置信度匹配最接近的意图，绝不默认 wait
+    actions.push(createAction(raw, 'escape', 'front_door', '冲出房门采取行动', 0.42, 2, 4, 'high'));
+    warnings.push('无法精确理解你的意图，但检测到动作意图——绝不会让你停在原地。');
   }
 
   if (actions.length === 0) {

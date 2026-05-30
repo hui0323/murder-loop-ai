@@ -105,7 +105,9 @@ export default function App() {
           method: result.deathMethod,
         });
       }
-    } catch {
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('[murder-loop] 请求失败:', errMsg);
       setState(prev => ({
         ...prev,
         isParsing: false,
@@ -114,14 +116,13 @@ export default function App() {
           {
             id: `sys-${Date.now()}`,
             type: 'system',
-            content: '后端暂时没有回应，行动未写入循环。',
+            content: `后端暂时没有回应（${errMsg.slice(0, 60)}），行动未写入循环。`,
           },
         ],
       }));
     }
   };
 
-  // Confirmation is kept for component compatibility; free-form input now executes directly.
   const handleConfirmAction = () => {
     setState(prev => ({ ...prev, actionConfirmation: null }));
   };
@@ -171,16 +172,24 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {activeClue && (
+        <ClueRevealModal
+          clue={activeClue}
+          onClose={handleClueModalClose}
+          read={activeClueId ? !!readClues[activeClueId] : false}
+        />
+      )}
+
       <div className="flex flex-col h-screen bg-[#08080a] overflow-hidden text-zinc-200">
-      <Header 
-        time={state.time} 
-        location={state.location} 
+      <Header
+        time={state.time}
+        location={state.location}
         onRestart={handleRestart}
       />
-      
+
       {/* Mobile Sidebar Toggle */}
       <div className="lg:hidden absolute top-3 right-20 z-50">
-        <button 
+        <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="p-2 bg-black/50 backdrop-blur rounded-lg border border-white/5 text-zinc-400 hover:text-white"
         >
@@ -192,56 +201,84 @@ export default function App() {
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col min-w-0 border-r border-white/5 relative bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-zinc-900/10 via-[#08080a] to-[#08080a]">
           <StoryPanel log={state.storyLog} />
-          
+
           <div className="relative">
             {/* Soft gradient fade for text going behind input */}
             <div className="absolute -top-12 left-0 right-0 h-12 bg-gradient-to-t from-[#0c0c0e] to-transparent pointer-events-none" />
-            <InputArea 
-              onActionSubmit={handleActionSubmit}
-              onConfirmAction={handleConfirmAction}
-              onCancelAction={handleCancelAction}
-              isParsing={state.isParsing}
-              confirmationText={state.actionConfirmation}
-            />
+            {state.phase === 'death' || (state.ending && state.phase !== 'loop_started') ? (
+              <div className="shrink-0 z-10 pb-10 pt-20 px-4 md:px-12 bg-gradient-to-t from-[#08080a] to-transparent">
+                <div className="max-w-2xl mx-auto text-center flex flex-col items-center gap-3">
+                  <p className="text-red-400/80 font-serif text-lg tracking-wide">
+                    {state.phase === 'death' ? '你死了。' : '这一轮结束了。'}
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setState(prev => ({ ...prev, isParsing: true }));
+                      try {
+                        const resp = await fetch('/api/harness/turn', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ input: '', state: state.coreState }),
+                        });
+                        if (!resp.ok) throw new Error(`复活失败: ${resp.status}`);
+                        const result = await resp.json() as FrontendResolveResponse;
+                        setState(prev => ({
+                          ...prev,
+                          isParsing: false,
+                          time: result.time ?? prev.time,
+                          phase: result.phase ?? prev.phase,
+                          clues: result.clues ?? prev.clues,
+                          coreState: result.coreState ?? prev.coreState,
+                          ending: null,
+                          deathTitle: null,
+                          deathSummary: null,
+                          deathMethod: null,
+                          recap: result.recap ?? prev.recap,
+                        }));
+                      } catch {
+                        setState(prev => ({ ...prev, isParsing: false }));
+                      }
+                    }}
+                    className="px-6 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 hover:bg-red-500/20 transition-colors font-serif text-base"
+                  >
+                    再次醒来（保留记忆与线索）
+                  </button>
+                  <p className="text-zinc-600 text-xs mt-1">上一次循环中发现的线索会被保留。</p>
+                </div>
+              </div>
+            ) : (
+              <InputArea
+                onActionSubmit={handleActionSubmit}
+                onConfirmAction={handleConfirmAction}
+                onCancelAction={handleCancelAction}
+                isParsing={state.isParsing}
+                confirmationText={state.actionConfirmation}
+              />
+            )}
           </div>
         </main>
 
         {/* Desktop Sidebar */}
         <div className="hidden lg:block shrink-0 relative z-30">
-          <Sidebar
-            clues={state.clues}
-            coordination={state.coordination}
-            sidebar={state.sidebar}
-            recap={state.recap}
-            readClues={readClues}
-            onClueSelect={handleClueSelect}
-          />
+          <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} onClueSelect={handleClueSelect} readClues={readClues} />
         </div>
 
         {/* Mobile Sidebar Frame */}
         <AnimatePresence>
           {mobileMenuOpen && (
-            <motion.div 
-              initial={{ x: '100%' }} 
-              animate={{ x: 0 }} 
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: "spring", bounce: 0, duration: 0.4 }}
               className="absolute inset-y-0 right-0 w-80 z-40 lg:hidden shadow-2xl bg-[#08080a]"
             >
-               <Sidebar
-                 clues={state.clues}
-                 coordination={state.coordination}
-                 sidebar={state.sidebar}
-                 recap={state.recap}
-                 readClues={readClues}
-                 onClueSelect={handleClueSelect}
-               />
+               <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} onClueSelect={handleClueSelect} readClues={readClues} />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
     </div>
-    <ClueRevealModal open={Boolean(activeClue)} clue={activeClue} onClose={handleClueModalClose} />
     </>
   );
 }

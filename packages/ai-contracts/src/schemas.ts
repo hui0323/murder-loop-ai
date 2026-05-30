@@ -1,38 +1,10 @@
 import { z } from 'zod';
 
-export const ActionIntentSchema = z.enum([
-  'inspect',
-  'secure_entry',
-  'record',
-  'communicate',
-  'call_police',
-  'verify_identity',
-  'deceive',
-  'hide_evidence',
-  'preserve_evidence',
-  'open_door',
-  'self_care',
-  'wait',
-  'escape',
-  'unknown',
-]);
+// ActionIntent 不做 enum 校验——AI 可以自由创造新的意图
+export const ActionIntentSchema = z.string();
 
-export const ActionTargetSchema = z.enum([
-  'package',
-  'phone',
-  'front_door',
-  'window',
-  'closet',
-  'bed',
-  'bathroom',
-  'chair',
-  'linyue',
-  'chen_huaimin',
-  'police',
-  'room',
-  'self',
-  'unknown',
-]);
+// ActionTarget 不做 enum 校验——AI 可以自由使用任何物品/目标
+export const ActionTargetSchema = z.string();
 
 export const ParsedActionSchema = z.object({
   id: z.string(),
@@ -57,22 +29,8 @@ export const ActionPlanSchema = z.object({
 
 export const KillerStrategySchema = z.object({
   id: z.string(),
-  type: z.enum([
-    'phone_probe',
-    'soft_knock',
-    'landlord_excuse',
-    'fake_police',
-    'spare_key_entry',
-    'window_route',
-    'framing_pressure',
-    'power_cut',
-    'lure_linyue',
-    'fake_neighbor',
-    'fake_callback',
-    'message_reply',
-    'wait_for_fatigue',
-    'retreat',
-  ]),
+  // Killer strategy type: AI 自由选择，不做 enum 限制
+  type: z.string(),
   title: z.string(),
   rationale: z.string(),
   responseHint: z.string().optional(),
@@ -97,6 +55,7 @@ export const NarrationContextSchema = z.object({
   stateSnapshot: z.object({
     phase: z.string(),
     killerPhase: z.string(),
+    killerStatus: z.string(),
     policePhase: z.string(),
     linYuePhase: z.string(),
     evidencePhase: z.string(),
@@ -104,8 +63,20 @@ export const NarrationContextSchema = z.object({
     suspicion: z.number(),
     injury: z.string(),
     stress: z.number(),
-    clues: z.array(z.string()),
+    clues: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      detail: z.string(),
+      source: z.string(),
+      weight: z.number(),
+      discoveredAt: z.object({ run: z.number(), minute: z.number() }),
+      isPersistent: z.boolean(),
+    })),
     ending: z.string().nullable(),
+    phoneBattery: z.number().optional(),
+    phoneFunctional: z.boolean().optional(),
+    playerHolding: z.string().nullable().optional(),
+    combatTriggered: z.boolean().optional(),
   }),
   recentLog: z.array(z.object({
     minute: z.number(),
@@ -113,6 +84,14 @@ export const NarrationContextSchema = z.object({
     text: z.string(),
     channel: z.string().optional(),
   })).optional(),
+  knownClueTitles: z.array(z.string()).optional(),
+  combatContext: z.object({
+    playerWeapon: z.string().nullable(),
+    killerArmed: z.boolean(),
+    advantage: z.enum(['player', 'killer', 'mutual']),
+  }).optional(),
+  plotPhase: z.string().optional(),
+  playerSituation: z.string().optional(),
   forbiddenFacts: z.array(z.string()),
   styleGuide: z.array(z.string()),
 });
@@ -128,6 +107,14 @@ export const NpcReplySchema = z.object({
 export const NarrationSchema = z.object({
   title: z.string().min(1).max(24),
   text: z.string().min(1).max(1200),
+  isFatal: z.boolean().optional(),
+  killerKilled: z.boolean().optional(),
+  clue: z.object({
+    id: z.string(),
+    title: z.string(),
+    detail: z.string(),
+    weight: z.number().min(1).max(20),
+  }).optional(),
 });
 
 export const ScoreRecapSchema = z.object({

@@ -7,6 +7,7 @@ export function createInitialGameState(): GameState {
     minute: START_MINUTE,
     phase: 'loop_started',
     killerPhase: 'confirming_package',
+    killerStatus: 'alive',
     policePhase: 'not_contacted',
     linYuePhase: 'unaware',
     evidencePhase: 'package_unnoticed',
@@ -17,6 +18,8 @@ export function createInitialGameState(): GameState {
       stress: 32,
       hidden: false,
     },
+    playerHolding: null,
+    combatTriggered: false,
     clues: [],
     room: structuredClone(initialRoomObjects),
     killerKnowledge: {
@@ -44,6 +47,8 @@ export function createInitialGameState(): GameState {
     ],
     ending: null,
     score: null,
+    phoneBattery: 61,
+    phoneFunctional: true,
   };
 }
 

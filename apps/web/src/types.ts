@@ -1,4 +1,4 @@
-export type GamePhase = 
+export type GamePhase =
   | 'intro'
   | 'loop_started'
   | 'investigating'
@@ -14,7 +14,23 @@ export type EndingId =
   | 'framed_survivor'
   | 'escaped_without_truth'
   | 'survived_with_evidence'
-  | 'perfect_truth';
+  | 'perfect_truth'
+  | 'killer_dead_with_evidence'
+  | 'killer_dead_no_evidence'
+  | 'killer_arrested'
+  | 'killer_fled'
+  | 'mutual_kill'
+  | 'phone_dead_helpless';
+
+export type KillerStatus =
+  | 'alive'
+  | 'suspicious'
+  | 'confronting'
+  | 'injured'
+  | 'incapacitated'
+  | 'dead'
+  | 'arrested'
+  | 'fled';
 
 export interface StoryNode {
   id: string;
@@ -28,6 +44,7 @@ export interface Clue {
   name: string;
   description: string;
   status: 'new' | 'known' | 'lost';
+  source?: string;  // 'ai_generated' | 'static_fallback' | 'player_discovered'
 }
 
 export interface DirectorScore {

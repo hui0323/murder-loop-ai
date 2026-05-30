@@ -330,10 +330,10 @@ export async function frontendAdapterRoute(app: FastifyInstance) {
       time: minuteLabel(finalState.minute),
       location: '青荷公寓 503室',
       phase: finalState.phase,
-      clues: finalState.clues.map((id, index) => ({
-        id,
-        name: clueBook[id]?.title ?? id,
-        description: clueBook[id]?.detail ?? '线索已记录，详情由右侧情报面板继续扩展。',
+      clues: finalState.clues.map((clue, index) => ({
+        id: clue.id,
+        name: clue.title,
+        description: clue.detail,
         status: index === finalState.clues.length - 1 ? 'new' : 'known',
       })),
       storyLog: [

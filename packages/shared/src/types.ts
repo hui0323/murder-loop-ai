@@ -25,6 +25,17 @@ export type KillerPhase =
   | 'retreat'
   | 'exposed';
 
+/** 杀手物理状态——规则引擎和 AI 据此判断杀手能做什么 */
+export type KillerStatus =
+  | 'alive'
+  | 'suspicious'
+  | 'confronting'
+  | 'injured'
+  | 'incapacitated'
+  | 'dead'
+  | 'arrested'
+  | 'fled';
+
 export type PolicePhase =
   | 'not_contacted'
   | 'call_started'
@@ -69,41 +80,21 @@ export type EndingId =
   | 'framed_survivor'
   | 'escaped_without_truth'
   | 'survived_with_evidence'
-  | 'perfect_truth';
+  | 'perfect_truth'
+  | 'killer_dead_with_evidence'
+  | 'killer_dead_no_evidence'
+  | 'killer_arrested'
+  | 'killer_fled'
+  | 'mutual_kill'
+  | 'phone_dead_helpless';
 
 export type ScoreRank = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 
-export type ActionIntent =
-  | 'inspect'
-  | 'secure_entry'
-  | 'record'
-  | 'communicate'
-  | 'call_police'
-  | 'verify_identity'
-  | 'deceive'
-  | 'hide_evidence'
-  | 'preserve_evidence'
-  | 'open_door'
-  | 'self_care'
-  | 'wait'
-  | 'escape'
-  | 'unknown';
+/** AI 可以自由创造 intent。常用值: inspect, attack, pick_up, use_item, communicate, wait, escape 等 */
+export type ActionIntent = string;
 
-export type ActionTarget =
-  | 'package'
-  | 'phone'
-  | 'front_door'
-  | 'window'
-  | 'closet'
-  | 'bed'
-  | 'bathroom'
-  | 'chair'
-  | 'linyue'
-  | 'chen_huaimin'
-  | 'police'
-  | 'room'
-  | 'self'
-  | 'unknown';
+/** AI 可以自由使用任意 target。以下仅为常用值参考。 */
+export type ActionTarget = string;
 
 export interface ParsedAction {
   id: string;
@@ -148,8 +139,13 @@ export interface ClueRecord {
   id: string;
   title: string;
   detail: string;
-  source: string;
+  /** 'ai_generated' 由叙事 AI 动态生成 | 'static_fallback' 来自 clueBook | 'player_discovered' 由规则引擎触发 */
+  source: 'ai_generated' | 'static_fallback' | 'player_discovered';
   weight: number;
+  /** 发现时间和轮次 */
+  discoveredAt: { run: number; minute: number };
+  /** 跨循环保留（默认 true，AI 生成的线索在死亡后依然记得） */
+  isPersistent: boolean;
 }
 
 export interface RoomObjectState {
@@ -184,19 +180,32 @@ export interface GameState {
   minute: number;
   phase: GamePhase;
   killerPhase: KillerPhase;
+  /** 杀手的物理状态——规则引擎和 AI 据此判断他能做什么 */
+  killerStatus: KillerStatus;
   policePhase: PolicePhase;
   linYuePhase: LinYuePhase;
   evidencePhase: EvidencePhase;
   threat: number;
   suspicion: number;
   player: PlayerCondition;
-  clues: string[];
+  /** 当前手持物品 id（用于攻击判定），null 表示空手 */
+  playerHolding: string | null;
+  /** 本轮是否发生了战斗——战斗发生后触发结局检测 */
+  combatTriggered: boolean;
+  /** 线索列表——ClueRecord[] 替代旧的 string[]，支持 AI 动态生成 */
+  clues: ClueRecord[];
   room: Record<string, RoomObjectState>;
   killerKnowledge: KillerKnowledge;
   memory: MemoryFragment[];
   log: StoryLogEntry[];
   ending: EndingId | null;
   score: ScoreResult | null;
+  /** 手机电量（分钟），独立追踪 */
+  phoneBattery: number;
+  /** 手机是否可用（电量 > 0 且未被损坏） */
+  phoneFunctional: boolean;
+  /** Plot Director 生成的剧情指导——下一回合注入给叙事/杀手 AI */
+  plotGuidance?: string;
 }
 
 export interface RuleEvent {
@@ -211,11 +220,17 @@ export interface RuleResult {
   title: string;
   text: string;
   tone: StoryTone;
-  addedClues: string[];
+  addedClues: ClueRecord[];
   timePassed: number;
   threatDelta: number;
   events: RuleEvent[];
   state: GameState;
+}
+
+export interface CombatContext {
+  playerWeapon: string | null;
+  killerArmed: boolean;
+  advantage: 'player' | 'killer' | 'mutual';
 }
 
 export interface NarrationContext {
@@ -227,6 +242,7 @@ export interface NarrationContext {
   stateSnapshot: {
     phase: GamePhase;
     killerPhase: KillerPhase;
+    killerStatus: KillerStatus;
     policePhase: PolicePhase;
     linYuePhase: LinYuePhase;
     evidencePhase: EvidencePhase;
@@ -234,10 +250,22 @@ export interface NarrationContext {
     suspicion: number;
     injury: PlayerCondition['injury'];
     stress: number;
-    clues: string[];
+    clues: ClueRecord[];
     ending: EndingId | null;
+    phoneBattery: number;
+    phoneFunctional: boolean;
+    playerHolding: string | null;
+    combatTriggered: boolean;
   };
   recentLog: Array<Pick<StoryLogEntry, 'minute' | 'title' | 'text' | 'channel'>>;
+  /** AI 生成线索时的参考：已有线索标题列表 */
+  knownClueTitles: string[];
+  /** 战斗上下文（仅在 combatTriggered 时提供） */
+  combatContext?: CombatContext;
+  /** 当前剧情阶段描述（供 AI 叙事判断节奏） */
+  plotPhase: string;
+  /** 玩家处境摘要 */
+  playerSituation: string;
   forbiddenFacts: string[];
   styleGuide: string[];
 }
@@ -252,21 +280,8 @@ export interface NpcReply {
 
 export interface KillerStrategy {
   id: string;
-  type:
-    | 'phone_probe'
-    | 'soft_knock'
-    | 'landlord_excuse'
-    | 'fake_police'
-    | 'spare_key_entry'
-    | 'window_route'
-    | 'framing_pressure'
-    | 'power_cut'
-    | 'lure_linyue'
-    | 'fake_neighbor'
-    | 'fake_callback'
-    | 'message_reply'
-    | 'wait_for_fatigue'
-    | 'retreat';
+  /** AI 自由选择策略类型。常用: spare_key_entry, window_route, landlord_excuse, phone_probe, direct_confrontation, retreat 等 */
+  type: string;
   title: string;
   rationale: string;
   responseHint?: string;
@@ -277,6 +292,17 @@ export interface KillerStrategy {
 export interface Narration {
   title: string;
   text: string;
+  /** AI 判断：这一叙事是否意味着玩家死亡 */
+  isFatal?: boolean;
+  /** AI 判断：这一叙事是否意味着杀手死亡 */
+  killerKilled?: boolean;
+  /** AI 动态生成的线索 */
+  clue?: {
+    id: string;
+    title: string;
+    detail: string;
+    weight: number;
+  };
 }
 
 export interface ScoreResult {
