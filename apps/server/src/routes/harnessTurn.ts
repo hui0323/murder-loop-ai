@@ -211,8 +211,16 @@ export async function harnessTurnRoute(app: FastifyInstance) {
     }
 
     const harness = createAiHarness();
-    const beforeLen = state.log.length;
-    const resolution = await resolveTurnHarness(state, input, harness);
+
+    // 死亡后自动复活：如果 state 处于死亡/结局状态，先 rewind 再继续
+    let liveState = state;
+    if (state.phase === 'death' || (state.ending && state.phase !== 'loop_started')) {
+      const { rewindAfterDeath } = await import('@murder-loop-ai/game-core');
+      liveState = rewindAfterDeath(state);
+    }
+
+    const beforeLen = liveState.log.length;
+    const resolution = await resolveTurnHarness(liveState, input, harness);
 
     const sidebarAgent = harness.registry.getAgent('sidebar');
     const sidebar = sidebarAgent
