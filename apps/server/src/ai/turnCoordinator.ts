@@ -1,4 +1,4 @@
-import type { ActionPlan, GameState, KillerStrategy, Narration } from '@murder-loop-ai/shared';
+import type { ActionPlan, GameState, KillerStrategy, Narration, ParsedAction } from '@murder-loop-ai/shared';
 
 export interface TurnBlackboard {
   input: string;
@@ -73,7 +73,48 @@ function hasOpenDoorNegation(input: string) {
   ].some((word) => text.includes(word));
 }
 
+function hasSelfInjuryCheck(input: string) {
+  const text = normalized(input);
+  const bodyCue = /后脑勺|后脑|脑勺|头部|额头|脖子|身体|身上|伤口|伤|血|流血|出血|疼|痛/.test(text);
+  const checkCue = /摸|检查|确认|看看|查看|碰|按|擦|处理|包扎/.test(text);
+  return bodyCue && checkCue;
+}
+
+function planAlreadyHandlesSelfCare(plan: ActionPlan) {
+  return plan.actions.some((action) => action.intent === 'self_care' && action.target === 'self');
+}
+
+function repairSelfInjuryCheck(input: string, plan: ActionPlan, blackboard: TurnBlackboard): ActionPlan {
+  if (!hasSelfInjuryCheck(input) || planAlreadyHandlesSelfCare(plan)) return plan;
+
+  blackboard.warnings.push('action plan verifier repaired a self-injury check that was parsed as a passive action.');
+  const selfCareAction: ParsedAction = {
+    id: `repair-self-care-${Date.now()}`,
+    raw: input,
+    intent: 'self_care',
+    target: 'self',
+    method: '摸索后脑勺并检查是否有伤口、出血或明显疼痛',
+    confidence: Math.max(plan.confidence, 0.82),
+    timeCost: Math.max(1, Math.min(plan.actions[0]?.timeCost ?? 1, 2)),
+    noise: Math.min(plan.actions[0]?.noise ?? 0, 1),
+    risk: 'low',
+  };
+
+  return {
+    ...plan,
+    summary: '检查自己的伤口和身体状态',
+    actions: [
+      selfCareAction,
+      ...plan.actions.filter((action) => action.intent !== 'wait' && action.intent !== 'unknown'),
+    ].slice(0, 8),
+    confidence: Math.max(plan.confidence, 0.82),
+    warnings: [...plan.warnings, '系统已将检查自身伤口的输入修正为 self_care。'],
+  };
+}
+
 export function verifyActionPlan(input: string, plan: ActionPlan, blackboard: TurnBlackboard): ActionPlan {
+  plan = repairSelfInjuryCheck(input, plan, blackboard);
+
   if (!hasOpenDoorNegation(input)) {
     blackboard.artifacts.actionPlan = plan;
     return plan;

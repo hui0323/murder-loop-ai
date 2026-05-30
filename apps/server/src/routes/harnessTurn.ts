@@ -18,17 +18,57 @@ import {
   type StoryLogEntry,
   type TurnResolution,
 } from '@murder-loop-ai/shared';
+import { scoreNarrationWithDirector } from '../ai/directorScorer';
 import { completeRoleJson } from '../ai/openaiClient';
 import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNarration } from '../ai/turnCoordinator';
-import { scoreNarrationWithDirector } from '../ai/directorScorer';
 
-// ============================================================================
-// AI Adapter 函数 — 与 frontendAdapter.ts 共用相同的 AI 调用逻辑
-// ============================================================================
+interface FrontendStoryNode {
+  id: string;
+  type: 'narrative' | 'action_result' | 'system' | 'player_input';
+  content: string;
+  timestamp?: string;
+}
+
+interface HarnessTraceEntry {
+  taskId: string;
+  source: string;
+  decision?: string;
+  warnings: string[];
+  durationMs: number;
+}
+
+interface HarnessCoordination {
+  warnings: string[];
+  trace: HarnessTraceEntry[];
+  judgements: Record<string, unknown>;
+}
+
+interface HarnessTurnResolution extends TurnResolution {
+  coordination: HarnessCoordination;
+}
+
+interface HarnessLike {
+  resolveTurn(state: GameState, input: string): Promise<HarnessTurnResolution>;
+}
+
+interface HarnessAiAdapterSet {
+  aiAdapters: AiAdapters;
+  coordination?: {
+    warnings?: string[];
+    judgements?: Record<string, unknown>;
+  };
+}
+
+interface HarnessTurnRouteOptions {
+  createHarness?: () => HarnessLike;
+  createAiAdapters?: (input: string, state: GameState) => HarnessAiAdapterSet;
+}
 
 async function parseActionAi(input: string, state: GameState): Promise<ActionPlan> {
-  const fallback = (await import('@murder-loop-ai/game-core')).fallbackParseAction(input);
+  const { fallbackParseAction } = await import('@murder-loop-ai/game-core');
+  const fallback = fallbackParseAction(input);
   const blackboard = createTurnBlackboard(input, state);
+
   try {
     const ai = await completeRoleJson(
       'parse',
@@ -50,13 +90,12 @@ async function parseActionAi(input: string, state: GameState): Promise<ActionPla
   }
 }
 
-async function killerStrategyAi(
-  state: GameState,
-  plan?: ActionPlan,
-): Promise<KillerStrategy> {
+async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<KillerStrategy> {
   const { chooseFallbackKillerStrategy, projectKillerVisibleState } = await import('@murder-loop-ai/game-core');
   const fallback = chooseFallbackKillerStrategy(state);
   const visible = projectKillerVisibleState(state);
+  const blackboard = createTurnBlackboard('', state);
+
   try {
     const ai = await completeRoleJson(
       'killer',
@@ -68,14 +107,14 @@ async function killerStrategyAi(
         '节奏一小步一小步收紧。低压用短信/轻敲；中压用房东借口/断电；高压才考虑假警察、窗外路线。',
         '只输出 JSON，必须符合 KillerStrategySchema。',
       ].join('\n'),
-      { visibleState: visible, allowedShape: fallback },
+      { visibleState: visible, plan, allowedShape: fallback },
       { temperature: 0.55 },
     );
     const parsed = KillerStrategySchema.safeParse(ai);
     if (!parsed.success) throw new Error('killer strategy schema mismatch');
-    return verifyKillerStrategy(state, parsed.data, createTurnBlackboard('', state));
+    return verifyKillerStrategy(state, parsed.data, blackboard);
   } catch {
-    return verifyKillerStrategy(state, fallback, createTurnBlackboard('', state));
+    return verifyKillerStrategy(state, fallback, blackboard);
   }
 }
 
@@ -87,29 +126,48 @@ async function narrateActionAi(
 ): Promise<Narration> {
   const { createFallbackActionNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackActionNarration(playerResult);
+  const blackboard = createTurnBlackboard('', state);
   const system = [
     '你是《23:47》"行动回应"作者。只写玩家动作的落地结果，不写下一波环境推进。',
     '只使用 narrationContext.events 里的事实。不新增证据，不改变时间/生死/NPC状态。',
     '文风参考悬疑网文：段落有推进，句子有钩子。多写门锁、猫眼、手机冷光、纸箱气味、脚步距离。',
     '220-520 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
+
   try {
-    const ai = await completeRoleJson('narrator', system, { narrationContext: context, playerResult, state }, { temperature: 0.72 });
+    const ai = await completeRoleJson(
+      'narrator',
+      system,
+      { narrationContext: context, playerResult, state },
+      { temperature: 0.72 },
+    );
     const parsed = NarrationSchema.safeParse(ai);
     if (!parsed.success) throw new Error('action narration schema mismatch');
-    const narration = verifyNarration(parsed.data, fallback, createTurnBlackboard('', state), 'actionNarration');
-    // 导演评分 + 必要时重写
-    const score = await scoreNarrationWithDirector({ slot: 'action', narration, context, playerResult, killerResult, state });
+
+    const narration = verifyNarration(parsed.data, fallback, blackboard, 'actionNarration');
+    const score = await scoreNarrationWithDirector({
+      slot: 'action',
+      narration,
+      context,
+      playerResult,
+      killerResult,
+      state,
+    });
+
     if (score.verdict === 'rewrite') {
-      const rewrite = await completeRoleJson('narrator',
-        `${system}\n\n根据导演意见重写：${score.rewriteBrief}`, { narrationContext: context, playerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief }, { temperature: 0.68 }
+      const rewrite = await completeRoleJson(
+        'narrator',
+        `${system}\n\n根据导演意见重写：${score.rewriteBrief}`,
+        { narrationContext: context, playerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
+        { temperature: 0.68 },
       ).catch(() => null);
       const reparsed = NarrationSchema.safeParse(rewrite);
-      if (reparsed.success) return verifyNarration(reparsed.data, fallback, createTurnBlackboard('', state), 'actionNarration');
+      if (reparsed.success) return verifyNarration(reparsed.data, fallback, blackboard, 'actionNarration');
     }
+
     return narration;
   } catch {
-    return verifyNarration(fallback, fallback, createTurnBlackboard('', state), 'actionNarration');
+    return verifyNarration(fallback, fallback, blackboard, 'actionNarration');
   }
 }
 
@@ -121,39 +179,51 @@ async function narrateAmbientAi(
 ): Promise<Narration> {
   const { createFallbackAmbientNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackAmbientNarration(playerResult, killerResult);
+  const blackboard = createTurnBlackboard('', state);
   const system = [
     '你是《23:47》"环境播报/暗线镜头"。只写门外、楼道、手机、时间、来电、灯光、窗外等环境变化。',
     '不要复述玩家动作细节，不要写玩家心理。只呈现玩家能直接感知的现象。',
     '语言要像悬疑网文的收尾钩子：具体、克制、最后一句压住下一步选择。',
     '90-240 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
+
   try {
-    const ai = await completeRoleJson('narrator', system, { narrationContext: context, killerResult, state }, { temperature: 0.78 });
+    const ai = await completeRoleJson(
+      'narrator',
+      system,
+      { narrationContext: context, killerResult, state },
+      { temperature: 0.78 },
+    );
     const parsed = NarrationSchema.safeParse(ai);
     if (!parsed.success) throw new Error('ambient narration schema mismatch');
-    const narration = verifyNarration(parsed.data, fallback, createTurnBlackboard('', state), 'ambientNarration');
-    const score = await scoreNarrationWithDirector({ slot: 'ambient', narration, context, playerResult, killerResult, state });
+
+    const narration = verifyNarration(parsed.data, fallback, blackboard, 'ambientNarration');
+    const score = await scoreNarrationWithDirector({
+      slot: 'ambient',
+      narration,
+      context,
+      playerResult,
+      killerResult,
+      state,
+    });
+
     if (score.verdict === 'rewrite') {
-      const rewrite = await completeRoleJson('narrator',
-        `${system}\n\n根据导演意见重写：${score.rewriteBrief}`, { narrationContext: context, killerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief }, { temperature: 0.72 }
+      const rewrite = await completeRoleJson(
+        'narrator',
+        `${system}\n\n根据导演意见重写：${score.rewriteBrief}`,
+        { narrationContext: context, killerResult, state, previousNarration: narration, directorRewriteBrief: score.rewriteBrief },
+        { temperature: 0.72 },
       ).catch(() => null);
       const reparsed = NarrationSchema.safeParse(rewrite);
-      if (reparsed.success) return verifyNarration(reparsed.data, fallback, createTurnBlackboard('', state), 'ambientNarration');
+      if (reparsed.success) return verifyNarration(reparsed.data, fallback, blackboard, 'ambientNarration');
     }
+
     return narration;
   } catch {
-    return verifyNarration(fallback, fallback, createTurnBlackboard('', state), 'ambientNarration');
+    return verifyNarration(fallback, fallback, blackboard, 'ambientNarration');
   }
 }
 
-// ============================================================================
-// Harness + AI 工厂
-// ============================================================================
-
-/**
- * 创建带 AI adapter 的 Harness。
- * AI 不可用时自动降级为 fallback。
- */
 function createAiHarness() {
   const aiAdapters: AiAdapters = {
     parseAction: (input, state) => parseActionAi(input, state),
@@ -163,18 +233,8 @@ function createAiHarness() {
     narrateAmbient: (context, playerResult, killerResult, state) =>
       narrateAmbientAi(context, playerResult, killerResult, state),
   };
+
   return createHarness(aiAdapters);
-}
-
-// ============================================================================
-// 前端数据转换
-// ============================================================================
-
-interface FrontendStoryNode {
-  id: string;
-  type: 'narrative' | 'action_result' | 'system' | 'player_input';
-  content: string;
-  timestamp?: string;
 }
 
 function toFrontendClues(state: GameState) {
@@ -195,6 +255,7 @@ function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
       timestamp: minuteLabel(entry.minute),
     };
   }
+
   if (entry.tone === 'system') {
     return {
       id: entry.id,
@@ -203,6 +264,7 @@ function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
       timestamp: minuteLabel(entry.minute),
     };
   }
+
   return {
     id: entry.id,
     type: 'narrative',
@@ -211,11 +273,51 @@ function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
   };
 }
 
-// ============================================================================
-// 路由注册
-// ============================================================================
+function defaultHarness(createAiAdapters?: (input: string, state: GameState) => HarnessAiAdapterSet): HarnessLike {
+  return {
+    async resolveTurn(state: GameState, input: string): Promise<HarnessTurnResolution> {
+      const adapterSet = createAiAdapters?.(input, state);
+      const harness = adapterSet ? createHarness(adapterSet.aiAdapters) : createAiHarness();
+      const resolution = await resolveTurnHarness(state, input, harness);
+      const trace = harness.dispatcher.getTrace().map((entry) => ({
+        taskId: entry.eventType,
+        source: entry.source,
+        warnings: entry.warnings,
+        durationMs: entry.durationMs,
+      }));
 
-export async function harnessTurnRoute(app: FastifyInstance) {
+      return {
+        ...resolution,
+        coordination: {
+          warnings: [
+            ...(adapterSet?.coordination?.warnings ?? []),
+            ...trace.flatMap((entry) => entry.warnings),
+          ],
+          trace,
+          judgements: adapterSet?.coordination?.judgements ?? {},
+        },
+      };
+    },
+  };
+}
+
+function deathMethodFor(ending: NonNullable<GameState['ending']>) {
+  return ({
+    default_murder: '锁芯轻响，门缝里的光先于脚步进入房间。',
+    opened_to_fake_police: '你给了门缝，对方给了一个足够近的假身份。',
+    window_route_death: '窗外雨棚成了第二条入口，门不是唯一边界。',
+    hidden_inside_death: '你以为房间里只剩自己，呼吸声却从更近的地方响起。',
+    framed_survivor: '你活了下来，但证据的位置开始替别人说话。',
+    escaped_without_truth: '你离开了房间，真相却还留在 503。',
+    survived_with_evidence: '录音、照片和官方回拨把房间从孤岛变成现场。',
+    perfect_truth: '证据链闭合之前，陈怀民已经没有下一句借口。',
+  } as Record<string, string>)[ending];
+}
+
+export async function harnessTurnRoute(
+  app: FastifyInstance,
+  options: HarnessTurnRouteOptions = {},
+) {
   app.post('/api/harness/turn', async (request) => {
     const body = request.body as { input?: string; state?: GameState };
     const input = body.input?.trim() ?? '';
@@ -229,38 +331,20 @@ export async function harnessTurnRoute(app: FastifyInstance) {
         phase: state.phase,
         clues: toFrontendClues(state),
         storyLog: [] satisfies FrontendStoryNode[],
-        coordination: { warnings: [], trace: [], judgements: {} },
+        coordination: {
+          warnings: [],
+          trace: [],
+          judgements: {},
+        },
       };
     }
 
-    // 使用带 AI 的 harness
-    const harness = createAiHarness();
+    const harness = options.createHarness ? options.createHarness() : defaultHarness(options.createAiAdapters);
     const beforeLogLength = state.log.length;
-    const resolution = await resolveTurnHarness(state, input, harness);
-
-    // 提取死亡信息
+    const resolution = await harness.resolveTurn(state, input);
     const endingEntry = resolution.finalState.ending
       ? resolution.finalState.log[resolution.finalState.log.length - 1]
       : null;
-    const deathMethod = resolution.finalState.ending
-      ? ({
-          default_murder: '锁芯轻响，门缝里的光先于脚步进入房间。',
-          opened_to_fake_police: '你给了门缝，对方给了一个足够近的假身份。',
-          window_route_death: '窗外雨棚成了第二条入口，门不是唯一边界。',
-          hidden_inside_death: '你以为房间里只剩自己，呼吸声却从更近的地方响起。',
-          framed_survivor: '你活了下来，但证据的位置开始替别人说话。',
-          escaped_without_truth: '你离开了房间，真相却还留在 503。',
-          survived_with_evidence: '录音、照片和官方回拨把房间从孤岛变成现场。',
-          perfect_truth: '证据链闭合之前，陈怀民已经没有下一句借口。',
-        } as Record<string, string>)[resolution.finalState.ending]
-      : null;
-
-    const trace = harness.dispatcher.getTrace().map((entry) => ({
-      taskId: entry.eventType,
-      source: entry.source,
-      warnings: entry.warnings,
-      durationMs: entry.durationMs,
-    }));
 
     return {
       coreState: resolution.finalState,
@@ -271,10 +355,14 @@ export async function harnessTurnRoute(app: FastifyInstance) {
       ending: resolution.finalState.ending,
       deathTitle: resolution.finalState.phase === 'death' ? endingEntry?.title ?? '23:47' : null,
       deathSummary: resolution.finalState.phase === 'death' ? endingEntry?.text ?? null : null,
-      deathMethod,
+      deathMethod: resolution.finalState.ending ? deathMethodFor(resolution.finalState.ending) : null,
       score: resolution.finalState.score,
       storyLog: [
-        { id: `input-${Date.now()}`, type: 'player_input', content: input },
+        {
+          id: `input-${Date.now()}`,
+          type: 'player_input',
+          content: input,
+        },
         ...resolution.finalState.log.slice(beforeLogLength).map(toFrontendNode),
       ] satisfies FrontendStoryNode[],
       turn: {
@@ -283,11 +371,7 @@ export async function harnessTurnRoute(app: FastifyInstance) {
         actionNarration: resolution.actionNarration ?? resolution.narration,
         ambientNarration: resolution.ambientNarration ?? null,
       },
-      coordination: {
-        warnings: trace.flatMap((t) => t.warnings),
-        trace,
-        judgements: {},
-      },
+      coordination: resolution.coordination,
     };
   });
 }

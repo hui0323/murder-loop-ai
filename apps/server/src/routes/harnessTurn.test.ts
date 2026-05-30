@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import { createInitialGameState } from '@murder-loop-ai/game-core';
-import type { GameState, TurnResolution } from '@murder-loop-ai/shared';
+import type { ActionPlan, GameState, KillerStrategy, Narration, TurnResolution } from '@murder-loop-ai/shared';
+import { createTurnBlackboard, verifyActionPlan } from '../ai/turnCoordinator';
 import { harnessTurnRoute } from './harnessTurn';
 
 type HarnessTurnResolution = TurnResolution & {
@@ -129,7 +130,7 @@ async function testHarnessTurnRouteReturnsFrontendPackage() {
 
   const body = response.json();
   assert.equal(body.time, '23:00');
-  assert.equal(body.location, 'Qinghe Apartment 503');
+  assert.equal(body.location, '青荷公寓 503 室');
   assert.equal(body.phase, finalState.phase);
   assert.ok(Array.isArray(body.clues));
   assert.equal(body.coreState.log.at(-1).title, 'Message reply');
@@ -143,7 +144,9 @@ async function testHarnessTurnRouteReturnsFrontendPackage() {
 async function testDefaultHarnessRouteReturnsDispatcherTrace() {
   const app = Fastify({ logger: false });
 
-  await app.register(harnessTurnRoute);
+  await app.register(harnessTurnRoute, {
+    createAiAdapters: () => ({ aiAdapters: {} }),
+  });
 
   const response = await app.inject({
     method: 'POST',
@@ -167,5 +170,117 @@ async function testDefaultHarnessRouteReturnsDispatcherTrace() {
   await app.close();
 }
 
+async function testDefaultHarnessRouteInjectsAiAdapters() {
+  const app = Fastify({ logger: false });
+  const aiPlan: ActionPlan = {
+    id: 'ai-plan',
+    raw: 'check head injury',
+    summary: 'Check the back of my head for an injury',
+    actions: [
+      {
+        id: 'ai-action',
+        raw: 'check head injury',
+        intent: 'self_care',
+        target: 'self',
+        method: 'touch the back of my head and check for bleeding',
+        confidence: 0.93,
+        timeCost: 1,
+        noise: 0,
+        risk: 'low',
+      },
+    ],
+    confidence: 0.93,
+    warnings: [],
+  };
+  const aiStrategy: KillerStrategy = {
+    id: 'ai-strategy',
+    type: 'wait_for_fatigue',
+    title: 'Wait outside',
+    rationale: 'The player has not exposed new information.',
+    visibleToPlayer: true,
+    risk: 'low',
+  };
+  const actionNarration: Narration = {
+    title: 'Checked wound',
+    text: 'Your fingers find the sore spot behind your head.',
+  };
+  const ambientNarration: Narration = {
+    title: 'Hallway pause',
+    text: 'The hallway stays quiet for another breath.',
+  };
+
+  await app.register(harnessTurnRoute, {
+    createAiAdapters: () => ({
+      aiAdapters: {
+        parseAction: async () => aiPlan,
+        chooseKillerStrategy: async () => aiStrategy,
+        narrateAction: async () => actionNarration,
+        narrateAmbient: async () => ambientNarration,
+      },
+      coordination: {
+        warnings: ['adapter factory used'],
+        judgements: {
+          facts: { source: 'test' },
+          directorScores: [],
+        },
+      },
+    }),
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/harness/turn',
+    payload: {
+      input: 'check head injury',
+      state: baseState,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json();
+  assert.equal(body.turn.plan.actions[0].intent, 'self_care');
+  assert.equal(body.turn.actionNarration.title, 'Checked wound');
+  assert.equal(body.turn.ambientNarration.title, 'Hallway pause');
+  assert.equal(body.coordination.trace[0].source, 'ai');
+  assert.ok(body.coordination.warnings.includes('adapter factory used'));
+
+  await app.close();
+}
+
+function testActionPlanVerifierRepairsSelfInjuryChecks() {
+  const plan: ActionPlan = {
+    id: 'bad-ai-plan',
+    raw: '我摸一摸后脑勺，检查下有没有伤口',
+    summary: '等待并观察',
+    actions: [
+      {
+        id: 'bad-ai-action',
+        raw: '我摸一摸后脑勺，检查下有没有伤口',
+        intent: 'wait',
+        target: 'self',
+        method: '保持原位观察',
+        confidence: 0.72,
+        timeCost: 1,
+        noise: 0,
+        risk: 'low',
+      },
+    ],
+    confidence: 0.72,
+    warnings: [],
+  };
+
+  const repaired = verifyActionPlan(
+    '我摸一摸后脑勺，检查下有没有伤口',
+    plan,
+    createTurnBlackboard('我摸一摸后脑勺，检查下有没有伤口', baseState),
+  );
+
+  assert.equal(repaired.actions[0].intent, 'self_care');
+  assert.equal(repaired.actions[0].target, 'self');
+}
+
 await testHarnessTurnRouteReturnsFrontendPackage();
 await testDefaultHarnessRouteReturnsDispatcherTrace();
+await testDefaultHarnessRouteInjectsAiAdapters();
+testActionPlanVerifierRepairsSelfInjuryChecks();

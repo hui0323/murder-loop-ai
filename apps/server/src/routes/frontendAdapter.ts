@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ActionPlanSchema, KillerStrategySchema, NarrationSchema } from '@murder-loop-ai/ai-contracts';
 import { clueBook } from '@murder-loop-ai/content';
 import { chooseFallbackKillerStrategy, createFallbackActionNarration, createFallbackAmbientNarration, createInitialGameState, fallbackParseAction, projectKillerVisibleState, resolveTurn } from '@murder-loop-ai/game-core';
+import type { AiAdapters } from '@murder-loop-ai/game-core';
 import { minuteLabel, type ActionPlan, type GameState, type KillerStrategy, type Narration, type NarrationContext, type RuleResult, type StoryLogEntry } from '@murder-loop-ai/shared';
 import { completeRoleJson } from '../ai/openaiClient';
 import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNarration } from '../ai/turnCoordinator';
@@ -256,6 +257,30 @@ async function narrateAmbientForFrontend(context: NarrationContext, playerResult
   }
 
   return narration;
+}
+
+export function createFrontendHarnessAdapters(input: string, state: GameState) {
+  const blackboard = createTurnBlackboard(input, state);
+  const aiAdapters: AiAdapters = {
+    parseAction: async (actionInput, currentState) =>
+      verifyActionPlan(actionInput, await parseActionForFrontend(actionInput, currentState, blackboard), blackboard),
+    chooseKillerStrategy: (currentState, plan) => chooseKillerStrategyForFrontend(currentState, plan, blackboard),
+    narrateAction: (context, playerResult, killerResult, currentState) =>
+      narrateActionForFrontend(context, playerResult, killerResult, currentState, blackboard),
+    narrateAmbient: (context, playerResult, killerResult, currentState) =>
+      narrateAmbientForFrontend(context, playerResult, killerResult, currentState, blackboard),
+  };
+
+  return {
+    aiAdapters,
+    coordination: {
+      warnings: blackboard.warnings,
+      judgements: {
+        facts: blackboard.facts,
+        directorScores: blackboard.directorScores,
+      },
+    },
+  };
 }
 
 export async function frontendAdapterRoute(app: FastifyInstance) {
