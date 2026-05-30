@@ -149,7 +149,7 @@ export default function App() {
             title={endingCinematic.title}
             summary={endingCinematic.summary}
             method={endingCinematic.method}
-            onComplete={() => setEndingCinematic(null)}
+            onComplete={() => { setEndingCinematic(null); setShowCinematic(true); }}
           />
         )}
       </AnimatePresence>
