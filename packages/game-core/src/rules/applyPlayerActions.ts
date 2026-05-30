@@ -206,15 +206,8 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         state.room.front_door.state.opened = true;
         state.player.stress = clamp(state.player.stress + 15);
         threatDelta += 25;
-        // 持刀冲出门 → 高冲突，可能遭遇凶手
-        if (action.method?.includes('刀') || action.method?.includes('砍') || action.method?.includes('攻击')) {
-          return markEnding(state, 'opened_to_fake_police',
-            '刀锋撞上门框',
-            '你抓着刀冲出门的瞬间，走廊里站着一个人。不是你想象中的人。刀锋撞上门框，铁锈和湿纸箱的气味先于疼痛到达。你甚至没看清对方的脸。');
-        }
         title = '门被撞开';
-        texts.push('冲出门：门被猛地推开。走廊灯光刺眼，但看不到人。');
-        // 不判死——让 Killer AI 决定门外有什么
+        texts.push('冲出门：门被猛地推开。' + (action.method || ''));
         break;
       case 'open_door':
         state.room.front_door.state.opened = true;
@@ -236,8 +229,9 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         texts.push('等待观察：保持原位，降低主动暴露；继续监听门外和楼道变化。');
         break;
       default:
-        title = '暂时按兵不动';
-        texts.push('未识别的自由动作：未改变关键状态；保持当前位置并重新评估门、窗、手机和证据。');
+        // 不阻止任何行动——记录玩家意图，交给 AI 叙事判断
+        title = action.method || action.intent;
+        texts.push(`${action.method || action.intent}：${action.raw}`);
         break;
     }
   }
