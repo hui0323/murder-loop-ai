@@ -72,4 +72,5 @@ export interface GameState {
   deathSummary?: string | null;
   deathMethod?: string | null;
   coordination?: CoordinationState;
+  recap?: string;
 }

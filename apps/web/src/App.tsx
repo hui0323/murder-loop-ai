@@ -95,6 +95,7 @@ export default function App() {
           deathSummary: result.deathSummary ?? prev.deathSummary,
           deathMethod: result.deathMethod ?? prev.deathMethod,
           coordination: result.coordination ?? prev.coordination,
+          recap: result.recap ?? prev.recap,
           storyLog: [...prev.storyLog, ...resultLog],
         };
         persistFrontendState(nextState);
@@ -139,7 +140,7 @@ export default function App() {
     <>
       <AnimatePresence>
         {showCinematic && (
-          <CinematicIntro key="cinematic" onComplete={() => setShowCinematic(false)} />
+          <CinematicIntro key="cinematic" recap={state.recap} onComplete={() => setShowCinematic(false)} />
         )}
         {endingCinematic && (
           <CinematicTransition
