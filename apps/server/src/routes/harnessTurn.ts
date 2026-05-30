@@ -255,6 +255,9 @@ export async function harnessTurnRoute(app: FastifyInstance) {
       liveState = rewindAfterDeath(state);
     }
 
+    // 用原始状态生成 recap（不包含本回合结果）
+    const recap = generateRecap(liveState);
+
     const beforeLen = liveState.log.length;
     const resolution = await resolveTurnHarness(liveState, input, harness);
 
@@ -272,7 +275,7 @@ export async function harnessTurnRoute(app: FastifyInstance) {
     }));
 
     return {
-      recap: generateRecap(resolution.finalState),
+      recap,
       coreState: resolution.finalState, time: minuteLabel(resolution.finalState.minute),
       location: '青荷公寓 503 室', phase: resolution.finalState.phase,
       clues: toFrontendClues(resolution.finalState), ending: resolution.finalState.ending,
