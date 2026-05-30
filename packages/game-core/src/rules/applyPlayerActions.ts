@@ -50,7 +50,7 @@ function markEnding(state: GameState, ending: NonNullable<GameState['ending']>, 
   state.phase = ending.includes('survived') || ending === 'perfect_truth' || ending === 'escaped_without_truth' || ending === 'framed_survivor' ? 'survived' : 'death';
   state.score = scoreRun(state);
   const result = { title, text, tone: state.phase === 'death' ? 'death' : 'win', addedClues: [], timePassed: 0, threatDelta: 0, events: [event('ending', ending, text, [title])] } as Omit<RuleResult, 'state'>;
-  pushEntry(state, result);
+  
   return { ...result, state };
 }
 
@@ -256,6 +256,11 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
       event('state_change', 'time', compressedTime ? '一连串动作被压缩在短短几分钟内完成；电子钟只往后跳了一小格。' : '墙上的电子钟往后跳了一小段；走廊里的动静比刚才更靠近房门。', ['电子钟', '走廊声']),
     ],
   } satisfies Omit<RuleResult, 'state'>;
+  if (state.room.phone?.state) {
+    const perMin = state.room.phone.state.recording ? 3 : 1.5;
+    const bat: number = (state.room.phone.state as any).battery ?? 60;
+    (state.room.phone.state as any).battery = Math.max(0, bat - Math.round(perMin * timePassed));
+  }
   pushEntry(state, result);
   return { ...result, state };
 }
