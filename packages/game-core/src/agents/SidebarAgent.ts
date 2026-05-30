@@ -44,7 +44,7 @@ const PHASE_LABELS: Record<string, string> = {
   investigating: '搜证中',
   killer_pressure: '凶手施压',
   police_called: '已报警',
-  false_police_arrived: '假警察到场',
+  false_police_arrived: '警察到场',
   pre_2347_countdown: '23:47 倒计时',
   post_2347_escalation: '23:47 后',
   escape_attempt: '逃生',

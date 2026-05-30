@@ -24,3 +24,19 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-zinc-700;
 }
+
+@keyframes clueFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes clueRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

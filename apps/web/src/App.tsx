@@ -8,12 +8,15 @@ import { Header } from './components/Header';
 import { StoryPanel } from './components/StoryPanel';
 import { InputArea } from './components/InputArea';
 import { Sidebar } from './components/Sidebar';
+import { ClueRevealModal } from './components/ClueRevealModal';
 import { CinematicIntro } from './components/CinematicIntro';
 import { CinematicTransition } from './components/CinematicTransition';
-import { INITIAL_STATE } from './constants';
-import { GameState } from './types';
+import { Clue, GameState } from './types';
 import { Menu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { getClueAsset } from './clueAssets';
+import { ClueReadMap, findFirstNewClue, markClueRead } from './clueRevealState';
+import { loadFrontendState, persistFrontendState, resetFrontendProgress } from './frontendState';
 
 interface FrontendResolveResponse extends Partial<GameState> {
   coreState?: unknown;
@@ -28,30 +31,13 @@ interface EndingCinematicPayload {
   method?: string | null;
 }
 
-const FRONTEND_SAVE_KEY = 'murder-loop-ai:frontend-state:v1';
-
-function loadFrontendState(): GameState {
-  if (typeof window === 'undefined') return INITIAL_STATE;
-  try {
-    const raw = window.localStorage.getItem(FRONTEND_SAVE_KEY);
-    if (!raw) return INITIAL_STATE;
-    return { ...INITIAL_STATE, ...(JSON.parse(raw) as Partial<GameState>), isParsing: false, isParsingAction: false, actionConfirmation: null };
-  } catch {
-    return INITIAL_STATE;
-  }
-}
-
-function persistFrontendState(state: GameState) {
-  if (typeof window === 'undefined') return;
-  const cleanState: GameState = { ...state, isParsing: false, isParsingAction: false, actionConfirmation: null };
-  window.localStorage.setItem(FRONTEND_SAVE_KEY, JSON.stringify(cleanState));
-}
-
 export default function App() {
   const [showCinematic, setShowCinematic] = useState(true);
   const [endingCinematic, setEndingCinematic] = useState<EndingCinematicPayload | null>(null);
   const [state, setState] = useState<GameState>(() => loadFrontendState());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeClueId, setActiveClueId] = useState<string | null>(null);
+  const [readClues, setReadClues] = useState<ClueReadMap>({});
 
   useEffect(() => {
     persistFrontendState(state);
@@ -60,6 +46,7 @@ export default function App() {
   const handleActionSubmit = async (actionText: string) => {
     const newLogId = Date.now().toString();
     const coreState = state.coreState;
+    const previousClues = state.clues;
 
     setState(prev => ({
       ...prev,
@@ -79,6 +66,8 @@ export default function App() {
       if (!response.ok) throw new Error(`harness turn failed: ${response.status}`);
       const result = (await response.json()) as FrontendResolveResponse;
       const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
+      const resultClues = result.clues ?? previousClues;
+      const newClue = findFirstNewClue(previousClues, resultClues);
 
       setState(prev => {
         const nextState: GameState = {
@@ -88,7 +77,7 @@ export default function App() {
           time: result.time ?? prev.time,
           location: result.location ?? prev.location,
           phase: result.phase ?? prev.phase,
-          clues: result.clues ?? prev.clues,
+          clues: resultClues,
           coreState: result.coreState ?? prev.coreState,
           ending: result.ending ?? prev.ending,
           deathTitle: result.deathTitle ?? prev.deathTitle,
@@ -102,6 +91,10 @@ export default function App() {
         persistFrontendState(nextState);
         return nextState;
       });
+
+      if (newClue && getClueAsset(newClue.id)) {
+        setActiveClueId(newClue.id);
+      }
 
       if (result.ending && result.ending !== state.ending) {
         setEndingCinematic({
@@ -137,6 +130,29 @@ export default function App() {
     setState(prev => ({ ...prev, actionConfirmation: null }));
   };
 
+  const handleRestart = () => {
+    setState(resetFrontendProgress());
+    setShowCinematic(true);
+    setEndingCinematic(null);
+    setMobileMenuOpen(false);
+    setActiveClueId(null);
+    setReadClues({});
+  };
+
+  const handleClueSelect = (clue: Clue) => {
+    if (!getClueAsset(clue.id)) return;
+    setActiveClueId(clue.id);
+  };
+
+  const handleClueModalClose = () => {
+    if (activeClueId) {
+      setReadClues(prev => markClueRead(prev, activeClueId));
+    }
+    setActiveClueId(null);
+  };
+
+  const activeClue = activeClueId ? state.clues.find(clue => clue.id === activeClueId) ?? null : null;
+
   return (
     <>
       <AnimatePresence>
@@ -159,10 +175,11 @@ export default function App() {
       <Header 
         time={state.time} 
         location={state.location} 
+        onRestart={handleRestart}
       />
       
       {/* Mobile Sidebar Toggle */}
-      <div className="lg:hidden absolute top-3 right-4 z-50">
+      <div className="lg:hidden absolute top-3 right-20 z-50">
         <button 
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="p-2 bg-black/50 backdrop-blur rounded-lg border border-white/5 text-zinc-400 hover:text-white"
@@ -191,7 +208,14 @@ export default function App() {
 
         {/* Desktop Sidebar */}
         <div className="hidden lg:block shrink-0 relative z-30">
-          <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} />
+          <Sidebar
+            clues={state.clues}
+            coordination={state.coordination}
+            sidebar={state.sidebar}
+            recap={state.recap}
+            readClues={readClues}
+            onClueSelect={handleClueSelect}
+          />
         </div>
 
         {/* Mobile Sidebar Frame */}
@@ -204,12 +228,20 @@ export default function App() {
               transition={{ type: "spring", bounce: 0, duration: 0.4 }}
               className="absolute inset-y-0 right-0 w-80 z-40 lg:hidden shadow-2xl bg-[#08080a]"
             >
-               <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} />
+               <Sidebar
+                 clues={state.clues}
+                 coordination={state.coordination}
+                 sidebar={state.sidebar}
+                 recap={state.recap}
+                 readClues={readClues}
+                 onClueSelect={handleClueSelect}
+               />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
     </div>
+    <ClueRevealModal open={Boolean(activeClue)} clue={activeClue} onClose={handleClueModalClose} />
     </>
   );
 }
