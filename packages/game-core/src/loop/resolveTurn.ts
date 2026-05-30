@@ -161,8 +161,15 @@ function checkFatalAction(plan: import('@murder-loop-ai/shared').ActionPlan, sta
         }
       }
 
-      // open_door + 门加固 → 不致命
-      if (pattern.intent === 'open_door' && state.room?.front_door?.state?.barricaded) {
+      // open_door: 只在杀手暴力模式下才致命。普通对话/试探时开门不应瞬死。
+      if (pattern.intent === 'open_door') {
+        if (state.room?.front_door?.state?.barricaded) continue; // 门堵着开不了
+        // 杀手在暴力/强入模式 → 危险，交给 AI 判断（不硬编码死亡）
+        if (state.killerStatus === 'confronting' || state.threat >= 70) {
+          // 高危：开门可能致命，但让 AI 叙事决定
+          continue; // 不硬杀——AI 根据叙事上下文判断
+        }
+        // 杀手只是在试探/对话 → 开门不会立刻死
         continue;
       }
 
