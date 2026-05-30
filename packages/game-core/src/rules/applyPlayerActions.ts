@@ -202,32 +202,27 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
           }
           break;
         }
-        // 冲出门/逃跑 → 等同于开门，但意图更激烈
+        // 冲出门/逃跑
         state.room.front_door.state.opened = true;
         state.player.stress = clamp(state.player.stress + 15);
         threatDelta += 25;
-        // 如果有菜刀等攻击意图 → 直接判定为高冲突死亡
+        // 持刀冲出门 → 高冲突，可能遭遇凶手
         if (action.method?.includes('刀') || action.method?.includes('砍') || action.method?.includes('攻击')) {
           return markEnding(state, 'opened_to_fake_police',
             '刀锋撞上门框',
-            '你抓着菜刀冲出门的瞬间，走廊里有一个人。不是你想象中的人，不是一个，不是赤手空拳。刀锋撞上门框，铁锈和湿纸箱的气味先于疼痛到达。你甚至没看清对方的脸——只看到他后退半步时，袖口下面露出一截黑色的手套。');
-        }
-        if (state.phase === 'false_police_arrived' || state.threat >= 55) {
-          return markEnding(state, 'opened_to_fake_police',
-            '门缝已经够宽',
-            '我只把门开了一条缝。下一秒，黑手套从缝里伸进来，动作快得不像临时起意。掌心准确压住我的口鼻。我闻到雨水、皮革和消毒水味。');
+            '你抓着刀冲出门的瞬间，走廊里站着一个人。不是你想象中的人。刀锋撞上门框，铁锈和湿纸箱的气味先于疼痛到达。你甚至没看清对方的脸。');
         }
         title = '门被撞开';
-        texts.push('冲出门：门被猛地推开，门框撞到墙上发出闷响。走廊灯光刺眼，但看不到人——至少现在看不到。');
+        texts.push('冲出门：门被猛地推开。走廊灯光刺眼，但看不到人。');
+        // 不判死——让 Killer AI 决定门外有什么
         break;
       case 'open_door':
         state.room.front_door.state.opened = true;
-        if (state.phase === 'false_police_arrived' || state.threat >= 55) {
-          return markEnding(state, 'opened_to_fake_police', '门缝已经够宽', '我只把门开了一条缝。下一秒，黑手套从缝里伸进来，动作快得不像临时起意。对方没有再伪装声音，掌心准确压住我的口鼻。我闻到雨水、皮革和某种很淡的消毒水味，才明白所谓”警察”只是他选中的一张脸。');
-        }
-        title = '门开了一条缝';
+        state.room.front_door.state.chainLocked = false;
         threatDelta += 18;
-        texts.push('打开门：门缝被主动让出，近距离接触风险急剧上升。');
+        title = '门开了一条缝';
+        texts.push('打开门：门锁和门链被取下，门开了一条缝。走廊里的空气涌进来，带着雨水和灰尘的味道。');
+        // 不判死——让 Killer AI 根据叙事上下文决定后果
         break;
       case 'self_care':
         title = '厨房灯没有打开';
