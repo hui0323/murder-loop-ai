@@ -55,8 +55,8 @@ export const clueBook: Record<string, Omit<ClueRecord, 'discoveredAt'>> = {
   },
   chen_probe: {
     id: 'chen_probe',
-    title: '房东试探包裹',
-    detail: '陈怀民没有直接说包裹内容，只反复确认有没有”拿错东西”。',
+    title: '陌生号码试探包裹',
+    detail: '陌生号码没有说明身份，却反复确认你是否“拿错东西”、是否看见门口的快递。',
     source: 'player_discovered',
     weight: 14,
     isPersistent: true,
