@@ -1,9 +1,11 @@
-import { Smartphone, Brain, Gauge } from 'lucide-react';
+import { Smartphone, Brain, Gauge, BookOpen, X } from 'lucide-react';
+import { useState } from 'react';
 import { Clue, CoordinationState } from '../types';
 
 interface SidebarProps {
   clues: Clue[];
   coordination?: CoordinationState;
+  recap?: string;
 }
 
 function slotLabel(slot: 'action' | 'ambient') {
@@ -16,12 +18,46 @@ function scoreColor(total: number) {
   return 'text-emerald-300';
 }
 
-export function Sidebar({ clues, coordination }: SidebarProps) {
+// 故事背景
+const STORY_BG = `你叫沈知夏，今天刚搬进青荷公寓503室。桌上有一个被拆开了一半的纸箱——不是你买的。旧书、药板、一张写着"503"的数字纸条。这个包裹原本属于你的房东陈怀民。他控制着一条地下转运链，包裹里的东西足以让它崩塌。在第一轮中，你于23:47被杀。死亡后你带着模糊的记忆碎片回到了23:00。`;
+
+export function Sidebar({ clues, coordination, recap }: SidebarProps) {
   const directorScores = coordination?.directorScores ?? [];
+  const [showMemories, setShowMemories] = useState(false);
 
   return (
     <aside className="w-full lg:w-80 border-l border-white/5 bg-[#0a0a0c] lg:h-[calc(100vh-65px)] overflow-y-auto flex flex-col">
       <div className="p-6 flex-1">
+        {/* 回忆按钮 */}
+        <button
+          onClick={() => setShowMemories(!showMemories)}
+          className="w-full flex items-center gap-2 mb-6 px-3 py-2 rounded-lg border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors text-left"
+        >
+          <BookOpen className="w-4 h-4 text-zinc-500" />
+          <span className="font-mono text-xs tracking-widest text-zinc-400 uppercase">前情 & 回忆</span>
+          <span className="ml-auto text-zinc-600 text-xs">{showMemories ? '收起' : '展开'}</span>
+        </button>
+
+        {/* 回忆面板 */}
+        {showMemories && (
+          <div className="mb-6 p-4 bg-zinc-900/40 border border-white/5 rounded-lg space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-mono text-zinc-500 uppercase">故事背景</h3>
+              <button onClick={() => setShowMemories(false)} className="text-zinc-600 hover:text-zinc-400"><X className="w-3 h-3" /></button>
+            </div>
+            <p className="text-xs text-zinc-400 font-sans leading-relaxed">{STORY_BG}</p>
+            {recap && recap !== STORY_BG && (
+              <>
+                <div className="border-t border-white/5" />
+                <h3 className="text-xs font-mono text-zinc-500 uppercase">前情提要</h3>
+                {recap.split('\n').map((line, i) => (
+                  <p key={i} className="text-xs text-zinc-400 font-sans leading-relaxed">{line}</p>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-2 mb-6">
           <Brain className="w-4 h-4 text-zinc-500" />
           <h2 className="font-mono text-sm tracking-widest text-zinc-400 uppercase">已知情报</h2>
@@ -86,7 +122,7 @@ export function Sidebar({ clues, coordination }: SidebarProps) {
                   <p className="text-xs text-zinc-500 font-sans leading-relaxed">{clue.description}</p>
                 </div>
               ))}
-              
+
               <div className="bg-zinc-900/30 border border-white/5 border-dashed rounded-lg p-3 opacity-60">
                 <div className="flex items-center gap-2 text-zinc-400 font-sans text-sm mb-1">
                   <Smartphone className="w-3.5 h-3.5" /> 手机
@@ -97,8 +133,7 @@ export function Sidebar({ clues, coordination }: SidebarProps) {
           </div>
         </div>
       </div>
-      
-      {/* Decorative footer */}
+
       <div className="p-4 border-t border-white/5 bg-black/20 text-center">
         <div className="font-mono text-[10px] text-zinc-700 tracking-widest break-all">
           ID: S-503 // ENV: HOSTILE // V_0.3.1
