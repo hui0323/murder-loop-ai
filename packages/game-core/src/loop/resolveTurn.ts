@@ -28,9 +28,10 @@ import { NarratorAgent } from '../agents/NarratorAgent';
 import { DirectorAgent } from '../agents/DirectorAgent';
 import { NpcAgent } from '../agents/NpcAgent';
 import { UIAdapterAgent } from '../agents/UIAdapterAgent';
+import { SidebarAgent } from '../agents/SidebarAgent';
 
 export { GameEventBus, AgentRegistry, HarnessDispatcher };
-export { ParserAgent, RuleAgent, KillerAgent, NarratorAgent, DirectorAgent, NpcAgent, UIAdapterAgent };
+export { ParserAgent, RuleAgent, KillerAgent, NarratorAgent, DirectorAgent, NpcAgent, UIAdapterAgent, SidebarAgent };
 
 // ============================================================================
 // 向后兼容：保留旧的 AiAdapters 接口和 resolveTurn 函数
@@ -106,6 +107,101 @@ export interface TurnContext {
   directorResult?: { score: unknown; passed: boolean; violations: string[]; moodSignal?: string };
 }
 
+// ============================================================================
+// 致命行为检测 & 对话节点复活
+// ============================================================================
+
+interface FatalResult {
+  endingId: import('@murder-loop-ai/shared').EndingId;
+  title: string;
+  text: string;
+}
+
+const FATAL_PATTERNS: Array<{ intent: string; target?: string; endingId: import('@murder-loop-ai/shared').EndingId; title: string; text: string }> = [
+  {
+    intent: 'escape',
+    target: 'window',
+    endingId: 'window_route_death',
+    title: '雨棚之外',
+    text: '窗户推开的一瞬间，雨水和冷风灌了进来。你踩上窗沿的那一步没有犹豫，但雨棚的铁皮比你想象的更滑、更单薄。下坠的时间很短，短到来不及回想任何人。青荷公寓 503 室的灯光在雨中变远，电子钟还停在那一刻。',
+  },
+  {
+    intent: 'self_care',
+    endingId: 'hidden_inside_death',
+    title: '房间里只剩呼吸',
+    text: '你以为自己在保护自己，但有些伤害一旦开始就无法收回。房间还是那个房间，但你不再是那个你了。',
+  },
+  {
+    intent: 'open_door',
+    target: 'front_door',
+    endingId: 'opened_to_fake_police',
+    title: '你给了门缝',
+    text: '门链滑开的声音很轻，但足够让对方确认——屋里只有你一个人。',
+  },
+];
+
+/**
+ * 检查行动方案是否包含致命行为。
+ * AI 解析结果中的 intent 和 target 是主要判断依据。
+ * 返回 null 表示不致命，返回 FatalResult 表示触发死亡。
+ */
+function checkFatalAction(plan: import('@murder-loop-ai/shared').ActionPlan, state: GameState): FatalResult | null {
+  // 只检查 AI 解析的结果（confidence > 0 表示 AI 确认）
+  for (const action of plan.actions) {
+    for (const pattern of FATAL_PATTERNS) {
+      if (action.intent !== pattern.intent) continue;
+      if (pattern.target && action.target !== pattern.target) continue;
+
+      // escape + window 但窗户未开 → 先让规则系统处理（可能被阻止）
+      if (pattern.intent === 'escape' && pattern.target === 'window') {
+        const windowObj = state.room?.window;
+        if (windowObj && !windowObj.state?.opened) {
+          // 窗户没开，玩家可能在尝试开窗。不立即判定死亡，让规则系统处理。
+          continue;
+        }
+      }
+
+      // open_door + 门加固 → 不致命
+      if (pattern.intent === 'open_door' && state.room?.front_door?.state?.barricaded) {
+        continue;
+      }
+
+      return {
+        endingId: pattern.endingId,
+        title: pattern.title,
+        text: pattern.text,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * 保存对话检查点到 memory，用于死亡后复活到最近对话节点。
+ * 只在有 NPC 通信时保存。
+ */
+function saveConversationCheckpoint(state: GameState): void {
+  const lastCommunicate = [...state.log].reverse().find(
+    (entry) =>
+      entry.channel === 'action' &&
+      (entry.text.includes('林越') || entry.text.includes('陈怀民') || entry.text.includes('陌生号码') || entry.text.includes('警察')),
+  );
+  if (!lastCommunicate) return;
+
+  // 检查是否已保存过同一对话的检查点
+  const alreadySaved = state.memory.some(
+    (m) => m.id === `checkpoint-${lastCommunicate.id}`,
+  );
+  if (alreadySaved) return;
+
+  state.memory.push({
+    id: `checkpoint-${lastCommunicate.id}`,
+    run: state.run,
+    title: '对话节点',
+    text: `你在那一刻和外界建立了联系。如果发生意外，这是你最后的锚点。`,
+  });
+}
+
 /**
  * 创建 Harness 系统（EventBus + AgentRegistry 含所有 Agent）。
  *
@@ -138,15 +234,18 @@ export function createHarness(aiAdapters?: AiAdapters) {
   registry.register(DirectorAgent);
   registry.register(NpcAgent);
   registry.register(UIAdapterAgent);
+  registry.register(SidebarAgent);
 
   // 注入 AI adapter（如果提供）
+  // 注意：handler 不吞错误——HarnessDispatcher 负责 AI→fallback 降级和 trace 标记
   if (aiAdapters?.parseAction) {
     const agent = registry.getAgent('parser');
     if (agent) {
       const aiFn = aiAdapters.parseAction;
       agent.handler = async (payload: unknown) => {
         const { input, state } = payload as { input: string; state: GameState };
-        return aiFn(input, state).catch(() => agent.fallback(payload));
+        // 直接调用 AI，失败时让 HarnessDispatcher 处理 fallback
+        return aiFn(input, state);
       };
       agent.mode = 'ai';
     }
@@ -155,11 +254,9 @@ export function createHarness(aiAdapters?: AiAdapters) {
     const agent = registry.getAgent('killer');
     if (agent) {
       const aiFn = aiAdapters.chooseKillerStrategy;
-      agent.handler = async (payload: unknown, event) => {
+      agent.handler = async (payload: unknown) => {
         const ctx = payload as TurnContext;
-        return aiFn(ctx.state, ctx.plan, ctx.playerResult).catch(() =>
-          agent.fallback(payload, event) as Promise<KillerStrategy>,
-        );
+        return aiFn(ctx.state, ctx.plan, ctx.playerResult);
       };
       agent.mode = 'ai';
     }
@@ -170,23 +267,20 @@ export function createHarness(aiAdapters?: AiAdapters) {
       const actionNarrator = aiAdapters.narrateAction ?? aiAdapters.narrate;
       const ambientNarrator = aiAdapters.narrateAmbient ?? aiAdapters.narrate;
       agent.handler = async (payload: unknown) => {
-        if (!actionNarrator && !ambientNarrator) return agent.fallback(payload);
+        if (!actionNarrator && !ambientNarrator) {
+          throw new Error('no narrate adapter provided');
+        }
         const ctx = payload as TurnContext;
         const context = ctx.narrationContext ?? buildNarrationContext(ctx.playerResult!, ctx.killerResult!, ctx.plan?.summary ?? '');
-        const fallbackPair = await agent.fallback(payload) as {
-          actionNarration: Narration;
-          ambientNarration: Narration;
-        };
-        const actionNarration = actionNarrator
-          ? await actionNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state).catch(
-              () => fallbackPair.actionNarration,
-            )
-          : fallbackPair.actionNarration;
-        const ambientNarration = ambientNarrator
-          ? await ambientNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state).catch(
-              () => fallbackPair.ambientNarration,
-            )
-          : fallbackPair.ambientNarration;
+        // 并行调用两个叙事 AI，任一个失败即抛错误让 dispatcher fallback
+        const [actionNarration, ambientNarration] = await Promise.all([
+          actionNarrator
+            ? actionNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state)
+            : (agent.fallback(payload) as Promise<{ actionNarration: Narration; ambientNarration: Narration }>).then(f => f.actionNarration),
+          ambientNarrator
+            ? ambientNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state)
+            : (agent.fallback(payload) as Promise<{ actionNarration: Narration; ambientNarration: Narration }>).then(f => f.ambientNarration),
+        ]);
         return { actionNarration, ambientNarration };
       };
       agent.mode = 'ai';
@@ -220,8 +314,40 @@ export async function resolveTurnHarness(
     state: ctx.state,
   });
 
-  // 从 ParserAgent 的 fallback 获取 plan（AI 模式通过 handler 获取）
   ctx.plan = plan;
+
+  // Step 1.5: 致命行为检测 — AI 或规则判定危及生命的行为直接死亡
+  const fatalResult = checkFatalAction(plan, ctx.state);
+  if (fatalResult) {
+    const deathState = { ...ctx.state };
+    deathState.ending = fatalResult.endingId;
+    deathState.phase = 'death' as const;
+    deathState.log = [
+      ...deathState.log,
+      {
+        id: `death-${Date.now()}`,
+        run: deathState.run,
+        minute: deathState.minute,
+        title: fatalResult.title,
+        text: fatalResult.text,
+        tone: 'death' as const,
+        channel: 'action' as const,
+      },
+    ];
+    // 保存对话检查点到 memory（用于复活）
+    saveConversationCheckpoint(deathState);
+
+    return {
+      plan,
+      playerResult: { title: fatalResult.title, text: fatalResult.text, tone: 'death' as const, addedClues: [], timePassed: 0, threatDelta: 0, events: [], state: deathState },
+      killerStrategy: { id: 'fatal', type: 'retreat' as const, title: '无', rationale: '玩家已死亡', risk: 'low' as const, visibleToPlayer: false },
+      killerResult: { title: '', text: '', tone: 'system' as const, addedClues: [], timePassed: 0, threatDelta: 0, events: [], state: deathState },
+      narration: { title: fatalResult.title, text: fatalResult.text },
+      actionNarration: { title: fatalResult.title, text: fatalResult.text },
+      ambientNarration: { title: '', text: '' },
+      finalState: deathState,
+    };
+  }
 
   // Step 2: 执行规则
   const playerResult = await harness.dispatcher.runCommand('ActionParsed', {

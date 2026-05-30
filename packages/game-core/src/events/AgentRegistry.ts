@@ -5,7 +5,7 @@ import type { EventHandler, GameEvent, GameEventType } from './eventTypes';
 /**
  * Agent 标识符。
  */
-export type AgentId = 'parser' | 'killer' | 'narrator' | 'director' | 'npc' | 'rule' | 'ui-adapter';
+export type AgentId = 'parser' | 'killer' | 'narrator' | 'director' | 'npc' | 'rule' | 'ui-adapter' | 'sidebar';
 
 /**
  * Agent 处理器函数签名。
