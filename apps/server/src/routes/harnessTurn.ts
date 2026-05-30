@@ -34,32 +34,13 @@ function buildPlotContext(state: GameState, plan?: ActionPlan): string {
 
 function generateRecap(state: GameState): string {
   const memories = state.memory.filter(m => !m.id.startsWith('checkpoint-'));
-  const keyEvents = state.log
-    .filter(l => l.channel === 'action' && l.tone !== 'system')
-    .slice(-3);
 
-  const lines: string[] = [];
-
-  // 循环信息
   if (state.run > 1 && memories.length > 0) {
-    lines.push(`第 ${state.run} 次循环。上次死于：${memories[memories.length - 1]?.title || '未知'}`);
-  } else if (state.run === 1) {
-    lines.push('第 1 次循环。23:00，你在青荷公寓503室醒来。');
+    const last = memories[memories.length - 1];
+    return `第 ${state.run} 次循环。死因：${last.title}`;
   }
 
-  // 本循环已发生的关键事件
-  if (keyEvents.length > 0) {
-    lines.push('本循环关键事件：');
-    for (const evt of keyEvents) {
-      lines.push(`· ${evt.title}`);
-    }
-  }
-
-  if (lines.length === 0) {
-    return '新的循环开始了。';
-  }
-
-  return lines.join('\n');
+  return `第 ${state.run} 次循环。`;
 }
 
 // ============================================================================
