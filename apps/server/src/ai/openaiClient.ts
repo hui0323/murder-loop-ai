@@ -1,18 +1,22 @@
 import OpenAI from 'openai';
 import { env } from '../env';
+import { createKeyPicker } from './apiKeyPool';
 import { configForRole, type AiProvider, type AiRole } from './roleConfig';
+import { extractJson } from './unwrapJsonObject';
 
 interface CompletionOptions {
   modelOverride?: string;
   temperature?: number;
 }
 
+const pickApiKey = createKeyPicker(env.deepseekApiKeys);
+
 function configFor(provider: AiProvider, modelOverride?: string) {
-  if (provider === 'deepseek') return { apiKey: env.deepseekApiKey, baseURL: env.deepseekBaseUrl, model: modelOverride || env.deepseekModel };
-  if (provider === 'deepseek_killer') return { apiKey: env.deepseekKillerApiKey || env.deepseekApiKey, baseURL: env.deepseekKillerBaseUrl, model: modelOverride || env.deepseekKillerModel };
-  if (provider === 'deepseek_narrator') return { apiKey: env.deepseekNarratorApiKey || env.deepseekApiKey, baseURL: env.deepseekNarratorBaseUrl, model: modelOverride || env.deepseekNarratorModel };
-  if (provider === 'deepseek_npc') return { apiKey: env.deepseekNpcApiKey || env.deepseekApiKey, baseURL: env.deepseekNpcBaseUrl, model: modelOverride || env.deepseekNpcModel };
-  if (provider === 'deepseek_recap') return { apiKey: env.deepseekRecapApiKey || env.deepseekApiKey, baseURL: env.deepseekRecapBaseUrl, model: modelOverride || env.deepseekRecapModel };
+  if (provider === 'deepseek') return { apiKey: pickApiKey(provider, env.deepseekApiKey), baseURL: env.deepseekBaseUrl, model: modelOverride || env.deepseekModel };
+  if (provider === 'deepseek_killer') return { apiKey: pickApiKey(provider, env.deepseekKillerApiKey || env.deepseekApiKey), baseURL: env.deepseekKillerBaseUrl, model: modelOverride || env.deepseekKillerModel };
+  if (provider === 'deepseek_narrator') return { apiKey: pickApiKey(provider, env.deepseekNarratorApiKey || env.deepseekApiKey), baseURL: env.deepseekNarratorBaseUrl, model: modelOverride || env.deepseekNarratorModel };
+  if (provider === 'deepseek_npc') return { apiKey: pickApiKey(provider, env.deepseekNpcApiKey || env.deepseekApiKey), baseURL: env.deepseekNpcBaseUrl, model: modelOverride || env.deepseekNpcModel };
+  if (provider === 'deepseek_recap') return { apiKey: pickApiKey(provider, env.deepseekRecapApiKey || env.deepseekApiKey), baseURL: env.deepseekRecapBaseUrl, model: modelOverride || env.deepseekRecapModel };
   if (provider === 'duckingmind') return { apiKey: env.duckingmindApiKey || env.openaiApiKey, baseURL: env.duckingmindBaseUrl, model: modelOverride || env.duckingmindModel };
   return { apiKey: env.openaiApiKey, baseURL: env.openaiBaseUrl, model: modelOverride || env.openaiModel };
 }
@@ -39,7 +43,11 @@ export async function completeJson<T>(provider: AiProvider, system: string, user
 
   const content = completion.choices[0]?.message?.content;
   if (!content) return null;
-  return JSON.parse(content) as T;
+
+  // 先用 extractJson 裁剪出合法 JSON，避免 AI 在 JSON 外包裹 markdown 或说明文字
+  const json = extractJson(content);
+  if (!json) return null;
+  return JSON.parse(json) as T;
 }
 
 export async function completeRoleJson<T>(role: AiRole, system: string, user: unknown, options: Omit<CompletionOptions, 'modelOverride'> = {}): Promise<T | null> {

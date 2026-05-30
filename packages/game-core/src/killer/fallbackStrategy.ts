@@ -198,16 +198,6 @@ export function chooseFallbackKillerStrategy(state: GameState): KillerStrategy {
     };
   }
 
-  if (state.clues.some(c => c.id === 'package_photo') && !state.clues.some(c => c.id === 'linyue_has_photo')) {
-    return {
-      id: `killer-${Date.now()}`,
-      type: 'framing_pressure',
-      title: '证据反成风险',
-      rationale: '照片只在玩家手里，陈怀民可以制造玩家主动持有违禁物的压力。',
-      visibleToPlayer: true,
-      risk: 'medium',
-    };
-  }
 
   if (!recentlyUsed(state, 'landlord_excuse')) {
     return {

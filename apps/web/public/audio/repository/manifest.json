@@ -1,0 +1,299 @@
+{
+  "UI成功提示音": [
+    "【攻击_敌人_撞击_2】Attack_Enemy_Impact_2.wav",
+    "【攻击_敌人_撞击_3】Attack_Enemy_Impact_3.wav",
+    "【攻击_敌人_撞击_4】Attack_Enemy_Impact_4.wav"
+  ],
+  "UI错误提示音": [
+    "【界面_错误】UI_Error.wav"
+  ],
+  "人声短语": [
+    "a-sound-with-a-terrible-whisper-from-which-goosebumps.mp3",
+    "sound-with-the-whisper-of-an-old-woman-or-a-shaman-says-a-spell-in-the-ear.mp3"
+  ],
+  "关门声": [
+    "1.flac",
+    "2.flac",
+    "3.flac",
+    "4.flac",
+    "5.flac",
+    "6_main.ogg",
+    "7_main2.ogg"
+  ],
+  "刀具声": [
+    "knife1.flac",
+    "knife2.flac",
+    "knife_hard1.flac",
+    "knife_hard2.flac",
+    "knife_soft1.flac",
+    "knife_soft2.flac"
+  ],
+  "威胁警告音": [
+    "【岩石_泥土_咒语_冲击_2_版本2】Rock_Dirt_Spell_Impact_2_v2.wav",
+    "【岩石_泥土_法术_冲击_2_v1】Rock_Dirt_Spell_Impact_2_v1.wav"
+  ],
+  "开门声": [
+    "1.flac",
+    "2.flac",
+    "3.flac",
+    "4.flac"
+  ],
+  "快速心跳声": [
+    "the-heartbeat-is-quiet-with-a-gurgle.mp3"
+  ],
+  "拍照快门声": [
+    "muted-shutter-sound.mp3"
+  ],
+  "拖动家具声": [
+    "the-sound-of-dragging-the-body-on-the-floor.mp3"
+  ],
+  "拧瓶盖声": [
+    "1.flac",
+    "2.flac",
+    "3.flac"
+  ],
+  "拨号音": [
+    "feature-phone-dialing.mp3"
+  ],
+  "敲门声": [
+    "1.ogg",
+    "2.ogg",
+    "3.ogg",
+    "4.ogg"
+  ],
+  "断电声": [
+    "short-circuit-sound.mp3",
+    "short-circuit.mp3"
+  ],
+  "新线索提示音": [
+    "【微妙_魔法_冲击_1_v2】Subtle_Magic_Impact_1_v2.wav",
+    "【微妙_魔法_冲击_2_v1】Subtle_Magic_Impact_2_v1.wav",
+    "【微妙_魔法_冲击_2_v2】Subtle_Magic_Impact_2_v2.wav"
+  ],
+  "来电铃声": [
+    "romulan-alert.mp3"
+  ],
+  "楼道底噪声": [
+    "1.ogg",
+    "2.ogg",
+    "3.ogg",
+    "4_electric.ogg",
+    "5_fan.flac"
+  ],
+  "水流声": [
+    "1.flac",
+    "source1.flac",
+    "source_2.flac",
+    "source_4.flac",
+    "source_5.flac",
+    "source_6.flac",
+    "source_8.flac",
+    "source_9.flac"
+  ],
+  "水箱检查声": [
+    "toilet_1_flush.ogg",
+    "toilet_1_water_refill.ogg",
+    "toilet_2_flush.ogg",
+    "toilet_2_water_refill.ogg"
+  ],
+  "火焰燃烧声": [
+    "1.ogg",
+    "2.ogg",
+    "3.ogg",
+    "4_burst.flac",
+    "5_burst2.flac",
+    "6_single.ogg",
+    "7_single2.ogg"
+  ],
+  "狗叫声": [
+    "1.wav",
+    "2.wav",
+    "3_slow.ogg"
+  ],
+  "玻璃破碎声": [
+    "breaking_glass_1.flac",
+    "breaking_glass_2.flac",
+    "glass_hard_hit_1.flac",
+    "glass_hard_hit_2.flac",
+    "small_glass_breaking_1.flac",
+    "small_glass_breaking_2.flac",
+    "small_glass_breaking_3.flac",
+    "small_glass_breaking_4.flac",
+    "small_glass_breaking_5.flac",
+    "small_glass_breaking_6.flac",
+    "small_glass_breaking_7.flac"
+  ],
+  "电梯回声": [
+    "elevator-doors.mp3",
+    "elevator-ride.mp3",
+    "the-signal-in-the-elevator.mp3"
+  ],
+  "电流底噪声": [
+    "ambient_noise_2.flac"
+  ],
+  "短信提示音": [
+    "email-2.mp3"
+  ],
+  "窗帘滑动声": [
+    "palette_moving.flac"
+  ],
+  "窗户刮擦声": [
+    "1.flac",
+    "2.flac"
+  ],
+  "管道水流声": [
+    "1.flac",
+    "2.flac",
+    "water_faucet_1_end.ogg",
+    "water_faucet_1_loop.ogg",
+    "water_faucet_1_start.ogg"
+  ],
+  "紧张氛围音": [
+    "how-scary-if-you-hear-this-sound-in-the-dark-when-you-are-hiding-in-a-closet-or-closet.mp3"
+  ],
+  "紧张沉默底噪": [
+    "12000-hz-you-hear-if-under-50.mp3",
+    "ambient_noise_2.flac"
+  ],
+  "缓慢心跳声": [
+    "heartbeat-noisy-calm.mp3"
+  ],
+  "背景雨声": [
+    "0_sleepy_times_rain_loop.wav",
+    "1_light.ogg",
+    "2_medium.ogg",
+    "3_medium2.ogg",
+    "4_heavy.ogg",
+    "5_heavy2.ogg",
+    "6_window.ogg"
+  ],
+  "脚步远离声": [
+    "the-sound-of-footsteps-on-a-wooden-staircase-when-climbing.mp3"
+  ],
+  "虫鸣声": [
+    "1.flac",
+    "2.flac",
+    "3_bg.flac",
+    "4_bg2.flac"
+  ],
+  "衣柜开关声": [
+    "fridge1.flac",
+    "fridge2.flac"
+  ],
+  "触屏点击声": [
+    "electronic-sound-unlock-interface.mp3"
+  ],
+  "警报声": [
+    "romulan-alert.mp3"
+  ],
+  "转场音效": [
+    "【冲击_终结_打击】Impact_Finishing_Blow.wav"
+  ],
+  "近处脚步声": [
+    "distant-short-screeching-footstep-sound.mp3"
+  ],
+  "远处脚步声": [
+    "gravel1.flac",
+    "gravel_1.flac",
+    "gravel_2.flac",
+    "gravel_3.flac",
+    "gravel_4.flac",
+    "gravel_LAND.flac",
+    "pav_step_1.flac",
+    "pav_step_10.flac",
+    "pav_step_11.flac",
+    "pav_step_12.flac",
+    "pav_step_13.flac",
+    "pav_step_14.flac",
+    "pav_step_15.flac",
+    "pav_step_2.flac",
+    "pav_step_3.flac",
+    "pav_step_4.flac",
+    "pav_step_5.flac",
+    "pav_step_6.flac",
+    "pav_step_7.flac",
+    "pav_step_8.flac",
+    "pav_step_9.flac"
+  ],
+  "通风管道声": [
+    "Vent_1.wav",
+    "Vent_2.wav",
+    "Ventillation_crickets.wav",
+    "Ventillation_crickets2.wav",
+    "big_vent_outside_crickets_in_bg_loop_1.flac",
+    "vent_1_end.ogg",
+    "vent_1_loop.ogg",
+    "vent_1_start.ogg",
+    "vent_2_end.ogg",
+    "vent_2_loop.ogg",
+    "vent_2_start.ogg",
+    "vent_3_end.ogg",
+    "vent_3_loop.ogg",
+    "vent_3_start.ogg",
+    "vent_shaft_outside_1.flac",
+    "vent_shaft_outside_crickets_bg_1.flac",
+    "vent_shaft_outside_crickets_bg_2.flac",
+    "ventillation_large_end.wav",
+    "ventillation_large_loop.wav",
+    "ventillation_large_start.wav"
+  ],
+  "金属撞击声": [
+    "metallic_hit_1.flac",
+    "metallic_hit_2.flac",
+    "metallic_hit_3.flac",
+    "metallic_hit_4.flac",
+    "metallic_hit_5.flac",
+    "metallic_hit_6.flac",
+    "metallic_hit_7.flac",
+    "metallic_hit_8.flac",
+    "metallic_hit_9.flac",
+    "metallic_hit_hall_1.ogg",
+    "metallic_hit_hall_2.ogg",
+    "metallic_hit_vibration_1.ogg",
+    "metallic_impact_1.ogg"
+  ],
+  "钥匙插入声": [
+    "1.flac",
+    "2.flac",
+    "3_drop.flac",
+    "4_drop2.flac",
+    "5_shake.flac",
+    "6_shake2.flac",
+    "7_knob.ogg"
+  ],
+  "锁门声": [
+    "1.ogg",
+    "10_key3.ogg",
+    "2.ogg",
+    "3.ogg",
+    "4.ogg",
+    "5.ogg",
+    "6.ogg",
+    "7.ogg",
+    "8_key.ogg",
+    "9_key2.ogg"
+  ],
+  "门链声": [
+    "rattling-glass-door.mp3"
+  ],
+  "门锁刮擦声": [
+    "locking-and-unlocking-doors-with-a-key.mp3"
+  ],
+  "隔壁电视声": [
+    "fast-switching-of-tv-channels.mp3",
+    "on-off-switch-on-tv.mp3",
+    "tv-signal-is-bad-glitch.mp3",
+    "tv-transformer-sound.mp3"
+  ],
+  "雨棚滴水声": [
+    "1.flac",
+    "2_rain_hard.wav"
+  ],
+  "雷声": [
+    "the-sound-of-thunder-after-a-flash-of-powerful-lightning.mp3",
+    "thunder-1.mp3",
+    "thunder-2.mp3",
+    "thunder-3.mp3",
+    "thunder-thunder-version-2.mp3"
+  ]
+}

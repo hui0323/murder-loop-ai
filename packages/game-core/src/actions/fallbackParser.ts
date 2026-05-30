@@ -72,7 +72,15 @@ export function fallbackParseAction(input: string): ActionPlan {
   }
 
   if (includesAny(text, ['拍照', '拍下来', '照片', '备份', '上传', '云盘', '定时发送'])) {
-    actions.push(createAction(raw, 'preserve_evidence', 'phone', '拍摄并保留证据', 0.88, 1, 0, 'low'));
+    // 如果前面已为包裹生成 preserve_evidence 动作，不再重复生成
+    const alreadyPhotographedPackage = includesAny(text, ['包裹', '纸箱', '快递', '旧书', '药盒']);
+    if (!alreadyPhotographedPackage) {
+      actions.push(createAction(raw, 'preserve_evidence', 'phone', '拍摄并保留证据', 0.88, 1, 0, 'low'));
+    }
+  }
+
+  if (includesAny(text, ['小红书', '社交平台', '发帖', '发布', '发到网上', '公开求认领'])) {
+    actions.push(createAction(raw, 'preserve_evidence', 'social_media', '将照片发布到社交平台留证并求证', 0.84, 2, 0, 'medium'));
   }
 
   if (includesAny(text, ['林越', '前男友', '发给他', '让他报警', '让他在楼下', '别上楼', '不要上楼', '短信'])) {

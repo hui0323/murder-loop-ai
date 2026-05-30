@@ -1,12 +1,17 @@
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
+import { parseApiKeys } from './ai/apiKeyPool';
 
-dotenv.config({ override: true });
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)), override: true });
+
+const deepseekApiKeys = parseApiKeys(process.env.DEEPSEEK_API_KEYS);
 
 export const env = {
   port: Number(process.env.AI_SERVER_PORT || 8788),
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   openaiBaseUrl: process.env.OPENAI_BASE_URL || undefined,
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  deepseekApiKeys,
   deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
   deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
   deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',

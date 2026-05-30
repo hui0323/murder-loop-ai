@@ -29,6 +29,7 @@ import { DirectorAgent } from '../agents/DirectorAgent';
 import { NpcAgent } from '../agents/NpcAgent';
 import { UIAdapterAgent } from '../agents/UIAdapterAgent';
 import { SidebarAgent } from '../agents/SidebarAgent';
+import { clearReviveProtection, hasReviveProtection } from './reviveProtection';
 
 export { GameEventBus, AgentRegistry, HarnessDispatcher };
 export { ParserAgent, RuleAgent, KillerAgent, NarratorAgent, DirectorAgent, NpcAgent, UIAdapterAgent, SidebarAgent };
@@ -111,77 +112,7 @@ export interface TurnContext {
 // 致命行为检测 & 对话节点复活
 // ============================================================================
 
-interface FatalResult {
-  endingId: import('@murder-loop-ai/shared').EndingId;
-  title: string;
-  text: string;
-}
-
-const FATAL_PATTERNS: Array<{ intent: string; target?: string; endingId: import('@murder-loop-ai/shared').EndingId; title: string; text: string }> = [
-  {
-    intent: 'escape',
-    target: 'window',
-    endingId: 'window_route_death',
-    title: '雨棚之外',
-    text: '窗户推开的一瞬间，雨水和冷风灌了进来。你踩上窗沿的那一步没有犹豫，但雨棚的铁皮比你想象的更滑、更单薄。下坠的时间很短，短到来不及回想任何人。青荷公寓 503 室的灯光在雨中变远，电子钟还停在那一刻。',
-  },
-  {
-    intent: 'self_care',
-    endingId: 'hidden_inside_death',
-    title: '房间里只剩呼吸',
-    text: '你以为自己在保护自己，但有些伤害一旦开始就无法收回。房间还是那个房间，但你不再是那个你了。',
-  },
-  {
-    intent: 'open_door',
-    target: 'front_door',
-    endingId: 'opened_to_fake_police',
-    title: '你给了门缝',
-    text: '门链滑开的声音很轻，但足够让对方确认——屋里只有你一个人。',
-  },
-];
-
-/**
- * 检查行动方案是否包含致命行为。
- * AI 解析结果中的 intent 和 target 是主要判断依据。
- * 返回 null 表示不致命，返回 FatalResult 表示触发死亡。
- */
-function checkFatalAction(plan: import('@murder-loop-ai/shared').ActionPlan, state: GameState): FatalResult | null {
-  // 只检查 AI 解析的结果（confidence > 0 表示 AI 确认）
-  for (const action of plan.actions) {
-    for (const pattern of FATAL_PATTERNS) {
-      if (action.intent !== pattern.intent) continue;
-      if (pattern.target && action.target !== pattern.target) continue;
-
-      // escape + window 但窗户未开 → 先让规则系统处理（可能被阻止）
-      if (pattern.intent === 'escape' && pattern.target === 'window') {
-        const windowObj = state.room?.window;
-        if (windowObj && !windowObj.state?.opened) {
-          // 窗户没开，玩家可能在尝试开窗。不立即判定死亡，让规则系统处理。
-          continue;
-        }
-      }
-
-      // open_door: 只在杀手暴力模式下才致命。普通对话/试探时开门不应瞬死。
-      if (pattern.intent === 'open_door') {
-        if (state.room?.front_door?.state?.barricaded) continue; // 门堵着开不了
-        // 杀手在暴力/强入模式 → 危险，交给 AI 判断（不硬编码死亡）
-        if (state.killerStatus === 'confronting' || state.threat >= 70) {
-          // 高危：开门可能致命，但让 AI 叙事决定
-          continue; // 不硬杀——AI 根据叙事上下文判断
-        }
-        // 杀手只是在试探/对话 → 开门不会立刻死
-        continue;
-      }
-
-      return {
-        endingId: pattern.endingId,
-        title: pattern.title,
-        text: pattern.text,
-      };
-    }
-  }
-  return null;
-}
+// Fatal outcomes are resolved by rule execution and reviewed narration proposals, not by intent lookup.
 
 /**
  * 保存对话检查点到 memory，用于死亡后复活到最近对话节点。
@@ -312,6 +243,7 @@ export async function resolveTurnHarness(
   input: string,
   harness: ReturnType<typeof createHarness>,
 ): Promise<TurnResolution> {
+  const startedWithReviveProtection = hasReviveProtection(state);
   // 构建回合上下文 — 在事件链中共享的可变状态
   const ctx: TurnContext = { input, state: { ...state } };
 
@@ -324,7 +256,7 @@ export async function resolveTurnHarness(
   ctx.plan = plan;
 
   // Step 1.5: 致命行为检测 — AI 或规则判定危及生命的行为直接死亡
-  const fatalResult = checkFatalAction(plan, ctx.state);
+  const fatalResult = null as null | { endingId: import('@murder-loop-ai/shared').EndingId; title: string; text: string };
   if (fatalResult) {
     const deathState = { ...ctx.state };
     deathState.ending = fatalResult.endingId;
@@ -416,6 +348,9 @@ export async function resolveTurnHarness(
 
   // Step 7: 组装最终状态
   const finalState = { ...ctx.state };
+  if (startedWithReviveProtection) {
+    clearReviveProtection(finalState);
+  }
   replaceLogEntry(finalState, playerLogId, {
     title: actionNarration.title,
     text: actionNarration.text,
@@ -460,6 +395,7 @@ export async function resolveTurn(
   input: string,
   aiAdapters: AiAdapters = {},
 ): Promise<TurnResolution> {
+  const startedWithReviveProtection = hasReviveProtection(state);
   const plan = aiAdapters.parseAction
     ? await aiAdapters
         .parseAction(input, state)
@@ -513,6 +449,9 @@ export async function resolveTurn(
   const ambientNarration = sanitizeNarration(rawAmbientNarration);
 
   const finalState = { ...killerResult.state };
+  if (startedWithReviveProtection) {
+    clearReviveProtection(finalState);
+  }
   replaceLogEntry(finalState, playerLogId, {
     title: actionNarration.title,
     text: actionNarration.text,
@@ -544,6 +483,7 @@ export async function resolveAmbientTurn(
   state: GameState,
   aiAdapters: Omit<AiAdapters, 'parseAction'> = {},
 ): Promise<AmbientResolution> {
+  const startedWithReviveProtection = hasReviveProtection(state);
   const ambientResult = advanceAmbientTurn(state);
   const killerStrategy = ambientResult.state.ending
     ? chooseFallbackKillerStrategy(ambientResult.state)
@@ -579,6 +519,9 @@ export async function resolveAmbientTurn(
   const narration = sanitizeNarration(rawNarration);
 
   const finalState = { ...killerResult.state };
+  if (startedWithReviveProtection) {
+    clearReviveProtection(finalState);
+  }
   finalState.log = [
     ...finalState.log,
     {

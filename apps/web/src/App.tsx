@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Header } from './components/Header';
 import { StoryPanel } from './components/StoryPanel';
 import { InputArea } from './components/InputArea';
@@ -11,6 +11,10 @@ import { Sidebar } from './components/Sidebar';
 import { ClueRevealModal } from './components/ClueRevealModal';
 import { CinematicIntro } from './components/CinematicIntro';
 import { CinematicTransition } from './components/CinematicTransition';
+import { RainPlayer } from './components/RainPlayer';
+import { VolumeControl } from './components/VolumeControl';
+import { AudioGate } from './components/AudioGate';
+import { useGameAudio } from './audio/hooks';
 import { Clue, GameState } from './types';
 import { Menu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -31,13 +35,34 @@ interface EndingCinematicPayload {
   method?: string | null;
 }
 
+function shouldShowIntroCinematic(state: GameState) {
+  return state.phase === 'intro' && !state.ending;
+}
+
 export default function App() {
-  const [showCinematic, setShowCinematic] = useState(true);
+  const [showCinematic, setShowCinematic] = useState(() => shouldShowIntroCinematic(loadFrontendState()));
   const [endingCinematic, setEndingCinematic] = useState<EndingCinematicPayload | null>(null);
   const [state, setState] = useState<GameState>(() => loadFrontendState());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeClueId, setActiveClueId] = useState<string | null>(null);
   const [readClues, setReadClues] = useState<ClueReadMap>({});
+  const [audioReady, setAudioReady] = useState(false);
+
+  // Audio: track last turn's action intents and killer type
+  const lastActionIntents = useRef<string[]>([]);
+  const lastKillerType = useRef<string | null>(null);
+  const lastTurnCompleted = useRef(false);
+
+  const threatLevel = state.sidebar?.threat?.level ?? 0;
+  useGameAudio({
+    phase: state.phase,
+    threat: threatLevel,
+    killerType: lastKillerType.current,
+    actionIntents: lastActionIntents.current,
+    isCinematic: showCinematic || Boolean(endingCinematic),
+    newClueAdded: Boolean(activeClueId),
+    turnCompleted: lastTurnCompleted.current,
+  });
 
   useEffect(() => {
     persistFrontendState(state);
@@ -64,10 +89,18 @@ export default function App() {
         body: JSON.stringify({ input: actionText, state: coreState }),
       });
       if (!response.ok) throw new Error(`harness turn failed: ${response.status}`);
-      const result = (await response.json()) as FrontendResolveResponse;
+      const result = (await response.json()) as FrontendResolveResponse & {
+        turn?: { plan?: { actions?: Array<{ intent: string }> }; killerStrategy?: { type: string } };
+      };
       const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
       const resultClues = result.clues ?? previousClues;
       const newClue = findFirstNewClue(previousClues, resultClues);
+
+      // Audio triggers from turn data
+      lastActionIntents.current = result.turn?.plan?.actions?.map(a => a.intent) ?? [];
+      lastKillerType.current = result.turn?.killerStrategy?.type ?? null;
+      lastTurnCompleted.current = true;
+      setTimeout(() => { lastTurnCompleted.current = false; }, 300);
 
       setState(prev => {
         const nextState: GameState = {
@@ -79,10 +112,10 @@ export default function App() {
           phase: result.phase ?? prev.phase,
           clues: resultClues,
           coreState: result.coreState ?? prev.coreState,
-          ending: result.ending ?? prev.ending,
-          deathTitle: result.deathTitle ?? prev.deathTitle,
-          deathSummary: result.deathSummary ?? prev.deathSummary,
-          deathMethod: result.deathMethod ?? prev.deathMethod,
+          ending: result.ending !== undefined ? result.ending : prev.ending,
+          deathTitle: result.deathTitle !== undefined ? result.deathTitle : prev.deathTitle,
+          deathSummary: result.deathSummary !== undefined ? result.deathSummary : prev.deathSummary,
+          deathMethod: result.deathMethod !== undefined ? result.deathMethod : prev.deathMethod,
           coordination: result.coordination ?? prev.coordination,
           recap: result.recap ?? prev.recap,
           sidebar: result.sidebar ?? prev.sidebar,
@@ -102,6 +135,14 @@ export default function App() {
           kind: result.phase === 'survived' ? 'survived' : 'death',
           title: result.deathTitle || (result.phase === 'survived' ? '你活了下来' : '23:47'),
           summary: result.deathSummary || '这一轮结束了。房间里的每一个细节都会回到下一次醒来。',
+          method: result.deathMethod,
+        });
+      } else if (result.phase === 'death' && state.phase !== 'death') {
+        setEndingCinematic({
+          key: `death-generic-${Date.now()}`,
+          kind: 'death',
+          title: result.deathTitle || '最后一秒',
+          summary: result.deathSummary || '黑暗来得很快，但这一次你会把这一秒记住，带去下一轮。',
           method: result.deathMethod,
         });
       }
@@ -155,6 +196,9 @@ export default function App() {
 
   return (
     <>
+      <RainPlayer />
+      {!audioReady && <AudioGate onUnlock={() => setAudioReady(true)} />}
+
       <AnimatePresence>
         {showCinematic && (
           <CinematicIntro key="cinematic" recap={state.recap} onComplete={() => setShowCinematic(false)} />
@@ -166,7 +210,7 @@ export default function App() {
             title={endingCinematic.title}
             summary={endingCinematic.summary}
             method={endingCinematic.method}
-            onComplete={() => { setEndingCinematic(null); setShowCinematic(true); }}
+            onComplete={() => { setEndingCinematic(null); setShowCinematic(false); }}
           />
         )}
       </AnimatePresence>
@@ -223,6 +267,7 @@ export default function App() {
                           ...prev,
                           isParsing: false,
                           time: result.time ?? prev.time,
+                          location: result.location ?? prev.location,
                           phase: result.phase ?? prev.phase,
                           clues: result.clues ?? prev.clues,
                           coreState: result.coreState ?? prev.coreState,
@@ -230,8 +275,11 @@ export default function App() {
                           deathTitle: null,
                           deathSummary: null,
                           deathMethod: null,
+                          coordination: result.coordination ?? prev.coordination,
                           recap: result.recap ?? prev.recap,
+                          sidebar: result.sidebar ?? prev.sidebar,
                         }));
+                        setShowCinematic(false);
                       } catch {
                         setState(prev => ({ ...prev, isParsing: false }));
                       }

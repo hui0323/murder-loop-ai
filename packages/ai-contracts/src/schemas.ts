@@ -13,7 +13,7 @@ export const ParsedActionSchema = z.object({
   target: ActionTargetSchema,
   method: z.string().optional(),
   confidence: z.number().min(0).max(1),
-  timeCost: z.number().min(0).max(20),
+  timeCost: z.number().min(1).max(5),
   noise: z.number().min(0).max(10),
   risk: z.enum(['low', 'medium', 'high']),
 });
@@ -104,9 +104,28 @@ export const NpcReplySchema = z.object({
   suggestedExternalAction: z.string(),
 });
 
+export const EndingIdSchema = z.enum([
+  'default_murder',
+  'opened_to_fake_police',
+  'window_route_death',
+  'hidden_inside_death',
+  'framed_survivor',
+  'escaped_without_truth',
+  'survived_with_evidence',
+  'perfect_truth',
+  'killer_dead_with_evidence',
+  'killer_dead_no_evidence',
+  'killer_arrested',
+  'killer_fled',
+  'mutual_kill',
+  'phone_dead_helpless',
+  'suicide',
+]);
+
 export const NarrationSchema = z.object({
   title: z.string().min(1).max(24),
   text: z.string().min(1).max(1200),
+  ending: EndingIdSchema.optional(),
   isFatal: z.boolean().optional(),
   killerKilled: z.boolean().optional(),
   clue: z.object({

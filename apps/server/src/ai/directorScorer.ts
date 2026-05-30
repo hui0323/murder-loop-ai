@@ -30,7 +30,6 @@ export async function scoreNarrationWithDirector(options: {
   state: GameState;
 }): Promise<DirectorScore> {
   const heuristic = heuristicDirectorScore(options.narration, options.slot, contextSummary(options.context));
-  if (heuristic.total < 60) return heuristic;
 
   const ai = await completeRoleJson(
     'recap',
@@ -63,15 +62,11 @@ export async function scoreNarrationWithDirector(options: {
     infoSafety: Math.round(parsed.data.infoSafety),
     ruleConsistency: Math.round(parsed.data.ruleConsistency),
     prose: Math.round(parsed.data.prose),
-    verdict: parsed.data.total < 78 || parsed.data.verdict === 'rewrite' ? 'rewrite' : 'pass',
+    verdict: parsed.data.verdict,
     issues: parsed.data.issues,
     rewriteBrief: parsed.data.rewriteBrief,
     source: 'ai',
   };
-
-  if (heuristic.verdict === 'rewrite' && score.verdict === 'pass') {
-    return { ...heuristic, issues: [...heuristic.issues, 'AI 评分通过但本地硬规则要求重写。'] };
-  }
 
   return score;
 }

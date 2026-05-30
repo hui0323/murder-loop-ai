@@ -3,6 +3,7 @@ import { KillerStrategySchema } from '@murder-loop-ai/ai-contracts';
 import { chooseFallbackKillerStrategy, projectKillerVisibleState } from '@murder-loop-ai/game-core';
 import type { GameState } from '@murder-loop-ai/shared';
 import { completeRoleJson } from '../ai/openaiClient';
+import { unwrapJsonObject } from '../ai/unwrapJsonObject';
 
 export async function killerStrategyRoute(app: FastifyInstance) {
   app.post('/api/killer-strategy', async (request) => {
@@ -20,13 +21,14 @@ export async function killerStrategyRoute(app: FastifyInstance) {
         '不要每回合都升级。玩家若已有证据外传、官方核验、门窗防御较强，可以 retreat 或 framing_pressure，让对抗转为嫁祸、拖延、灭证。',
         'visibleToPlayer=true 只代表玩家能感知到短信、敲门、脚步、来电、断电、窗沿声等外部现象；不要暴露凶手内心。',
         'title 像短章节标题，要有画面；rationale 写给调试看，说明为什么这一步在信息边界内合理。',
-        '只输出 JSON，不要 Markdown，不要解释，不要输出 schema 之外字段。',
+        '只输出一个裸 JSON 对象，不要 Markdown，不要解释，不要包在 strategy/killerStrategy/result 字段里。',
+        '必须包含且只需要这些字段：{"id":"killer-短id","type":"phone_probe|soft_knock|landlord_excuse|fake_police|spare_key_entry|window_route|framing_pressure|power_cut|lure_linyue|fake_neighbor|fake_callback|message_reply|wait_for_fatigue|retreat","title":"短标题","rationale":"为什么陈怀民在有限信息下会这么做","responseHint":"可选，若是短信/对话则写他发来的具体话","visibleToPlayer":true,"risk":"low|medium|high"}',
       ].join('\n'),
-      { visibleState: visible, allowedShape: fallback },
+      { visibleState: visible },
       { temperature: 0.55 },
     ).catch(() => null);
 
-    const parsed = KillerStrategySchema.safeParse(ai);
+    const parsed = KillerStrategySchema.safeParse(unwrapJsonObject(ai));
     return parsed.success ? parsed.data : fallback;
   });
 }

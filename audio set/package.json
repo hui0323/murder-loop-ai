@@ -1,0 +1,22 @@
+{
+  "name": "murder-loop-audio-set",
+  "version": "1.0.0",
+  "description": "独立音频系统整合包 — 文件夹驱动、清单发现、Howler.js 引擎、React 组件",
+  "type": "module",
+  "scripts": {
+    "scan": "node scripts/scan-audio-repo.mjs",
+    "fadeout": "node scripts/apply-fadeout.mjs",
+    "rainloop": "node scripts/create-rain-loop.mjs"
+  },
+  "dependencies": {
+    "howler": "^2.2.4"
+  },
+  "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "fluent-ffmpeg": "^2.1.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

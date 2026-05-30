@@ -1,6 +1,7 @@
 import { Clock, MapPin, RotateCcw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
+import { VolumeControl } from './VolumeControl';
 
 interface HeaderProps {
   time: string;
@@ -39,22 +40,25 @@ export function Header({ time, location, onRestart }: HeaderProps) {
           {location}
         </div>
       </div>
-      {onRestart && (
-        <button
-          type="button"
-          onClick={handleRestartClick}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-            confirming
-              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-              : 'text-zinc-500 hover:text-zinc-300 border border-transparent hover:border-white/10'
-          }`}
-          title="清除游戏上下文，重新开始"
-          aria-label="重新开始游戏"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          {confirming ? '确认重置？' : '重新开始'}
-        </button>
-      )}
+      <div className="flex items-center gap-3">
+        <VolumeControl />
+        {onRestart && (
+          <button
+            type="button"
+            onClick={handleRestartClick}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              confirming
+                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 border border-transparent hover:border-white/10'
+            }`}
+            title="清除游戏上下文，重新开始"
+            aria-label="重新开始游戏"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            {confirming ? '确认重置？' : '重新开始'}
+          </button>
+        )}
+      </div>
     </header>
   );
 }

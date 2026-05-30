@@ -40,6 +40,7 @@ export function sanitizeNarration(narration: Narration): Narration {
   }
 
   return {
+    ...narration,
     title: narration.title.trim(),
     text: paragraphs.join('\n\n').trim(),
   };

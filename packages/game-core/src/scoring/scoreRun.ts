@@ -6,7 +6,7 @@ function hasClue(state: GameState, id: string) {
 
 export function scoreRun(state: GameState): ScoreResult {
   // 更新结局判定：把新的结局 id 也纳入"存活"范围
-  const lethalEndings = ['default_murder', 'opened_to_fake_police', 'window_route_death', 'hidden_inside_death', 'mutual_kill'];
+  const lethalEndings = ['default_murder', 'opened_to_fake_police', 'window_route_death', 'hidden_inside_death', 'mutual_kill', 'suicide'];
   const survived = state.ending !== null && !lethalEndings.includes(state.ending ?? '');
   const survival = survived ? (state.player.injury === 'none' ? 20 : 12) : 0;
   const truth = Math.min(20, state.clues.filter(c => ['wrong_package', 'chen_probe', 'police_verified', 'door_scratch', 'chen_phone_found'].includes(c.id)).length * 5);

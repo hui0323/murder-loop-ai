@@ -3,6 +3,7 @@ import { cloneGameState } from '../state/createInitialState';
 import { event } from '../narration/buildNarrationContext';
 import { scoreRun } from '../scoring/scoreRun';
 import { ensurePoliceArrivalCountdown, isPoliceArrivalDue, resolvePoliceArrival } from '../rules/policeArrival';
+import { absorbReviveProtection, hasReviveProtection } from '../loop/reviveProtection';
 
 function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
@@ -27,6 +28,10 @@ export function advanceAmbientTurn(current: GameState): RuleResult {
   const noDefense = !state.room.front_door.state.barricaded && !state.room.window.state.locked;
 
   if (state.threat >= 76 && noDefense && noEvidenceShared) {
+    if (hasReviveProtection(state)) {
+      const protection = absorbReviveProtection(state, 'ambient_pressure');
+      return { ...protection, state };
+    }
     state.ending = 'default_murder';
     state.phase = 'death';
     state.score = scoreRun(state);

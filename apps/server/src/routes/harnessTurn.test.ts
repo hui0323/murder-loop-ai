@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import { createInitialGameState } from '@murder-loop-ai/game-core';
 import type { ActionPlan, GameState, KillerStrategy, Narration, TurnResolution } from '@murder-loop-ai/shared';
-import { createTurnBlackboard, verifyActionPlan } from '../ai/turnCoordinator';
+import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy } from '../ai/turnCoordinator';
 import { harnessTurnRoute } from './harnessTurn';
 
 type HarnessTurnResolution = TurnResolution & {
@@ -108,11 +108,17 @@ async function testHarnessTurnRouteReturnsFrontendPackage() {
   let calledWith: { stateMinute: number; input: string } | null = null;
 
   await app.register(harnessTurnRoute, {
-    createHarness: () => ({
-      resolveTurn: async (state: GameState, input: string) => {
-        calledWith = { stateMinute: state.minute, input };
-        return resolution;
+    createAiAdapters: () => ({
+      aiAdapters: {
+        parseAction: async (input: string, state: GameState) => {
+          calledWith = { stateMinute: state.minute, input };
+          return resolution.plan;
+        },
+        chooseKillerStrategy: async () => resolution.killerStrategy,
+        narrateAction: async () => resolution.narration,
+        narrateAmbient: async () => ({ title: 'Message reply', text: 'The unknown number replies with another question about the package.' }),
       },
+      coordination: { warnings: [], judgements: {} },
     }),
   });
 
@@ -129,13 +135,13 @@ async function testHarnessTurnRouteReturnsFrontendPackage() {
   assert.deepEqual(calledWith, { stateMinute: baseState.minute, input: 'reply to Chen' });
 
   const body = response.json();
-  assert.equal(body.time, '23:00');
+  assert.equal(body.time, '23:01');
   assert.equal(body.location, '青荷公寓 503 室');
-  assert.equal(body.phase, finalState.phase);
+  assert.equal(body.phase, 'investigating');
   assert.ok(Array.isArray(body.clues));
   assert.equal(body.coreState.log.at(-1).title, 'Message reply');
   assert.equal(body.storyLog[0].type, 'player_input');
-  assert.equal(body.storyLog[1].type, 'narrative');
+  assert.equal(body.storyLog[1].type, 'action_result');
   assert.equal(body.coordination.trace[0].taskId, 'PlayerActionSubmitted');
 
   await app.close();
@@ -248,18 +254,222 @@ async function testDefaultHarnessRouteInjectsAiAdapters() {
   await app.close();
 }
 
-function testActionPlanVerifierRepairsSelfInjuryChecks() {
+async function testFatalNarrationTakesPriorityWhenAiReturnsIt() {
+  const app = Fastify({ logger: false });
+  const aiPlan: ActionPlan = {
+    id: 'ai-plan',
+    raw: 'check head injury',
+    summary: 'Check the back of my head for an injury',
+    actions: [
+      {
+        id: 'ai-action',
+        raw: 'check head injury',
+        intent: 'self_care',
+        target: 'self',
+        method: 'touch the back of my head and check for bleeding',
+        confidence: 0.93,
+        timeCost: 1,
+        noise: 0,
+        risk: 'low',
+      },
+    ],
+    confidence: 0.93,
+    warnings: [],
+  };
+
+  await app.register(harnessTurnRoute, {
+    createAiAdapters: () => ({
+      aiAdapters: {
+        parseAction: async () => aiPlan,
+        chooseKillerStrategy: async () => ({
+          id: 'ai-strategy',
+          type: 'wait_for_fatigue',
+          title: 'Wait outside',
+          rationale: 'The player has not exposed new information.',
+          visibleToPlayer: true,
+          risk: 'low',
+        }),
+        narrateAction: async () => ({
+          title: 'Checked wound',
+          text: 'Your fingers find a sore spot, but nothing in the rule events says this is fatal.',
+          isFatal: true,
+        }),
+        narrateAmbient: async () => ({
+          title: 'Hallway pause',
+          text: 'The hallway stays quiet for another breath.',
+        }),
+      },
+      coordination: { warnings: [], judgements: { facts: {}, directorScores: [] } },
+    }),
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/harness/turn',
+    payload: {
+      input: 'check head injury',
+      state: baseState,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json();
+  assert.equal(body.coreState.phase, 'death');
+  assert.ok(
+    body.coordination.warnings.some((warning: string) => warning.includes('fatal narration accepted')),
+    'fatal narration should be accepted when AI explicitly returns it',
+  );
+  assert.equal(body.deathMethod, null);
+
+  await app.close();
+}
+
+async function testNarratedEscapeEndingIsAcceptedWhenEscapeWasActuallyResolved() {
+  const app = Fastify({ logger: false });
+  const escapePlan: ActionPlan = {
+    id: 'escape-plan',
+    raw: '冲出门跑去楼下手机店',
+    summary: '冲出门逃离 503',
+    actions: [
+      {
+        id: 'escape-action',
+        raw: '冲出门跑去楼下手机店',
+        intent: 'escape',
+        target: 'front_door',
+        method: '冲出门一路跑下楼',
+        confidence: 0.96,
+        timeCost: 1,
+        noise: 2,
+        risk: 'high',
+      },
+    ],
+    confidence: 0.96,
+    warnings: [],
+  };
+
+  await app.register(harnessTurnRoute, {
+    createAiAdapters: () => ({
+      aiAdapters: {
+        parseAction: async () => escapePlan,
+        chooseKillerStrategy: async () => ({
+          id: 'killer-retreat',
+          type: 'retreat',
+          title: '脚步慢了一拍',
+          rationale: '玩家已经脱离门口位置。',
+          visibleToPlayer: true,
+          risk: 'low',
+        }),
+        narrateAction: async () => ({
+          title: '便利店白光',
+          text: '你一口气冲下楼，街角手机店还亮着灯。自动门滑开时，503 和门外那串脚步声终于被你甩在雨夜后面。',
+          ending: 'escaped_without_truth',
+        }),
+        narrateAmbient: async () => ({
+          title: '楼道被抛在身后',
+          text: '雨点追着你落下去，楼上的声控灯没有再亮。',
+        }),
+      },
+      coordination: { warnings: [], judgements: { facts: {}, directorScores: [] } },
+    }),
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/harness/turn',
+    payload: {
+      input: '冲出门跑去楼下手机店',
+      state: baseState,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.coreState.ending, 'escaped_without_truth');
+  assert.equal(body.coreState.phase, 'survived');
+  assert.ok(body.coordination.warnings.some((warning: string) => warning.includes('narrated ending accepted')));
+
+  await app.close();
+}
+
+async function testNarratedEscapeEndingIsRejectedWhenOnlyPlayerClaimsIt() {
+  const app = Fastify({ logger: false });
+  const bluffPlan: ActionPlan = {
+    id: 'bluff-plan',
+    raw: '我已经逃到手机店了',
+    summary: '检查自己是否受伤',
+    actions: [
+      {
+        id: 'bluff-action',
+        raw: '我已经逃到手机店了',
+        intent: 'self_care',
+        target: 'self',
+        method: '摸了一下后脑勺',
+        confidence: 0.9,
+        timeCost: 1,
+        noise: 0,
+        risk: 'low',
+      },
+    ],
+    confidence: 0.9,
+    warnings: [],
+  };
+
+  await app.register(harnessTurnRoute, {
+    createAiAdapters: () => ({
+      aiAdapters: {
+        parseAction: async () => bluffPlan,
+        chooseKillerStrategy: async () => ({
+          id: 'killer-wait',
+          type: 'wait_for_fatigue',
+          title: '门外没动',
+          rationale: '没有发生足以结局化的位移。',
+          visibleToPlayer: true,
+          risk: 'low',
+        }),
+        narrateAction: async () => ({
+          title: '只是一个念头',
+          text: '你嘴里挤出那句“我已经逃到手机店了”，可手指摸到的还是后脑勺的钝痛，房间和门锁都还在原地。',
+          ending: 'escaped_without_truth',
+        }),
+        narrateAmbient: async () => ({
+          title: '门外没走',
+          text: '楼道里没有传来你期待中的远离声，只有雨声贴着窗。',
+        }),
+      },
+      coordination: { warnings: [], judgements: { facts: {}, directorScores: [] } },
+    }),
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/harness/turn',
+    payload: {
+      input: '我已经逃到手机店了',
+      state: baseState,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.notEqual(body.coreState.ending, 'escaped_without_truth');
+  assert.ok(body.coordination.warnings.some((warning: string) => warning.includes('narrated ending rejected')));
+
+  await app.close();
+}
+
+function testActionPlanVerifierDoesNotRewriteAiOutput() {
   const plan: ActionPlan = {
     id: 'bad-ai-plan',
-    raw: '我摸一摸后脑勺，检查下有没有伤口',
-    summary: '等待并观察',
+    raw: 'check the wound on the back of my head',
+    summary: 'Wait and observe',
     actions: [
       {
         id: 'bad-ai-action',
-        raw: '我摸一摸后脑勺，检查下有没有伤口',
+        raw: 'check the wound on the back of my head',
         intent: 'wait',
         target: 'self',
-        method: '保持原位观察',
+        method: 'stay still and observe',
         confidence: 0.72,
         timeCost: 1,
         noise: 0,
@@ -269,18 +479,49 @@ function testActionPlanVerifierRepairsSelfInjuryChecks() {
     confidence: 0.72,
     warnings: [],
   };
+  const blackboard = createTurnBlackboard('check the wound on the back of my head', baseState);
 
-  const repaired = verifyActionPlan(
-    '我摸一摸后脑勺，检查下有没有伤口',
-    plan,
-    createTurnBlackboard('我摸一摸后脑勺，检查下有没有伤口', baseState),
-  );
+  const verified = verifyActionPlan('check the wound on the back of my head', plan, blackboard);
 
-  assert.equal(repaired.actions[0].intent, 'self_care');
-  assert.equal(repaired.actions[0].target, 'self');
+  assert.equal(verified, plan);
+  assert.equal(verified.actions[0].intent, 'wait');
 }
 
+function testKillerStrategyVerifierDoesNotDowngradeAiOutput() {
+  const barricadedState: GameState = {
+    ...baseState,
+    room: {
+      ...baseState.room,
+      front_door: {
+        ...baseState.room.front_door,
+        state: {
+          ...baseState.room.front_door.state,
+          barricaded: true,
+        },
+      },
+    },
+  };
+  const strategy: KillerStrategy = {
+    id: 'killer-direct-entry',
+    type: 'spare_key_entry',
+    title: 'Spare key turns',
+    rationale: 'AI proposed a direct entry despite the barricade.',
+    visibleToPlayer: true,
+    risk: 'high',
+  };
+  const blackboard = createTurnBlackboard('', barricadedState);
+
+  const verified = verifyKillerStrategy(barricadedState, strategy, blackboard);
+
+  assert.equal(verified, strategy);
+  assert.equal(verified.type, 'spare_key_entry');
+  assert.ok(blackboard.warnings.some((warning) => warning.includes('did not rewrite')));
+}
 await testHarnessTurnRouteReturnsFrontendPackage();
 await testDefaultHarnessRouteReturnsDispatcherTrace();
 await testDefaultHarnessRouteInjectsAiAdapters();
-testActionPlanVerifierRepairsSelfInjuryChecks();
+await testFatalNarrationTakesPriorityWhenAiReturnsIt();
+await testNarratedEscapeEndingIsAcceptedWhenEscapeWasActuallyResolved();
+await testNarratedEscapeEndingIsRejectedWhenOnlyPlayerClaimsIt();
+testActionPlanVerifierDoesNotRewriteAiOutput();
+testKillerStrategyVerifierDoesNotDowngradeAiOutput();

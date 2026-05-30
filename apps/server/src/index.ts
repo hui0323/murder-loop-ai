@@ -22,7 +22,7 @@ app.get('/health', async () => ({
   service: 'murder-loop-ai-server',
   ai: {
     openai: Boolean(env.openaiApiKey),
-    deepseek: Boolean(env.deepseekApiKey),
+    deepseek: Boolean(env.deepseekApiKey || env.deepseekApiKeys.length),
     duckingmind: Boolean(env.duckingmindApiKey),
     roles: roleHealth(),
   },

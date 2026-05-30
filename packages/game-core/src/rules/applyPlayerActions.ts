@@ -4,6 +4,7 @@ import { cloneGameState } from '../state/createInitialState';
 import { scoreRun } from '../scoring/scoreRun';
 import { event } from '../narration/buildNarrationContext';
 import { ensurePoliceArrivalCountdown, isPoliceArrivalDue, resolvePoliceArrival } from './policeArrival';
+import { absorbReviveProtection, hasReviveProtection } from '../loop/reviveProtection';
 
 function addClue(state: GameState, added: ClueRecord[], clueId: string) {
   if (state.clues.some(c => c.id === clueId)) return;
@@ -27,8 +28,11 @@ function calculateTurnTime(actions: ActionPlan['actions']) {
   if (actions.length === 0) return 1;
   const onlyWaiting = actions.every((action) => action.intent === 'wait');
   if (onlyWaiting) return 1;
-  const complexity = actions.reduce((sum, action) => sum + Math.max(1, Math.min(action.timeCost || 1, 2)), 0);
-  return clamp(Math.ceil(complexity / 2), 1, 3);
+  const analyzedMinutes = actions.reduce((sum, action) => {
+    const timeCost = Number.isFinite(action.timeCost) ? action.timeCost : 1;
+    return sum + clamp(Math.round(timeCost), 1, 5);
+  }, 0);
+  return clamp(analyzedMinutes, 1, 5);
 }
 
 function extractReplyText(raw: string) {
@@ -114,7 +118,8 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         break;
       case 'preserve_evidence':
         state.room.package.state.photographed = true;
-        state.room.package.state.backedUp = action.raw.includes('备份') || action.raw.includes('云盘') || action.raw.includes('上传') || action.raw.includes('定时');
+        state.room.package.state.backedUp = action.raw.includes('备份') || action.raw.includes('云盘') || action.raw.includes('上传') || action.raw.includes('定时')
+          || ['小红书', '社交平台', '发帖', '发布', '发到', '公开'].some((word) => action.raw.includes(word));
         state.evidencePhase = state.linYuePhase === 'received_photo' ? 'evidence_shared' : state.room.package.state.backedUp ? 'evidence_backed_up' : 'package_photographed';
         addClue(state, addedClues, 'package_photo');
         title = '照片留下来了';
@@ -332,6 +337,12 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
 
     if (hasEvidence && hasDefense && policeTrusted) {
       return markEnding(state, 'survived_with_evidence', '23:47 没有吞掉我', '电子钟跳到 23:47 的时候，我几乎不敢眨眼。门外的人没有等到我开门，锁芯也没有再转动。录音、照片和官方回拨把这间屋子从孤岛变成了现场。我还活着，但我知道这不只是因为运气——是因为这一轮，我终于把证据送出了房间。');
+    }
+
+    if (hasReviveProtection(state)) {
+      const protection = absorbReviveProtection(state, 'deadline');
+      pushEntry(state, protection);
+      return { ...protection, state };
     }
 
     return markEnding(state, 'default_murder', '23:47', '电子钟跳到 23:47。门外的人不再敲门，锁芯却轻轻响了一声。我那一瞬间才明白，自己还是慢了一步：证据没有送到足够远的地方，门窗也没有把危险挡在外面。黑暗从门缝里挤进来，像上一轮死亡时一样熟悉。');

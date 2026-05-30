@@ -1,6 +1,7 @@
 import { firstDeathMemory } from '@murder-loop-ai/content';
 import { START_MINUTE, type GameState } from '@murder-loop-ai/shared';
 import { createInitialGameState } from '../state/createInitialState';
+import { grantReviveProtection } from './reviveProtection';
 
 export function rewindAfterDeath(state: GameState): GameState {
   // 优先查找对话检查点 — 如果玩家因致命行为死亡，复活到最近对话
@@ -24,8 +25,7 @@ export function rewindAfterDeath(state: GameState): GameState {
     ].slice(-8);
     // 保留跨循环线索（isPersistent: true）
     next.clues = state.clues.filter(c => c.isPersistent);
-    next.room = state.room;        // 保留房间状态
-    next.player = state.player;    // 保留玩家状态
+    grantReviveProtection(next);
     next.log = [
       {
         id: `rewind-${next.run}`,
@@ -54,6 +54,7 @@ export function rewindAfterDeath(state: GameState): GameState {
   ].slice(-8);
   // 只保留跨循环标记的线索（AI 动态生成的线索通常 isPersistent: true）
   next.clues = state.clues.filter(c => c.isPersistent);
+  grantReviveProtection(next);
   next.log = [
     {
       id: `rewind-${next.run}`,

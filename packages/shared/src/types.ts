@@ -86,7 +86,8 @@ export type EndingId =
   | 'killer_arrested'
   | 'killer_fled'
   | 'mutual_kill'
-  | 'phone_dead_helpless';
+  | 'phone_dead_helpless'
+  | 'suicide';
 
 export type ScoreRank = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 
@@ -103,6 +104,7 @@ export interface ParsedAction {
   target: ActionTarget;
   method?: string;
   confidence: number;
+  /** 动作分析 agent 评估的本回合耗时，单位分钟，范围 1~5 */
   timeCost: number;
   noise: number;
   risk: 'low' | 'medium' | 'high';
@@ -204,6 +206,8 @@ export interface GameState {
   phoneBattery: number;
   /** 手机是否可用（电量 > 0 且未被损坏） */
   phoneFunctional: boolean;
+  /** 死亡回溯后的首回合保护，保证玩家不会在刚醒来的第一回合再次死亡 */
+  reviveProtectionTurns?: number;
   /** Hidden resolver: once real police are confirmed, the background minute when they arrive. */
   policeArrivalMinute?: number;
   /** Plot Director 生成的剧情指导——下一回合注入给叙事/杀手 AI */
@@ -294,6 +298,8 @@ export interface KillerStrategy {
 export interface Narration {
   title: string;
   text: string;
+  /** AI 可直接声明本回合已进入某个明确结局 */
+  ending?: EndingId;
   /** AI 判断：这一叙事是否意味着玩家死亡 */
   isFatal?: boolean;
   /** AI 判断：这一叙事是否意味着杀手死亡 */

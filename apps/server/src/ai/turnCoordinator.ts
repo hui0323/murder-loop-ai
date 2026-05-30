@@ -1,4 +1,4 @@
-import type { ActionPlan, GameState, KillerStrategy, Narration, ParsedAction } from '@murder-loop-ai/shared';
+import type { ActionPlan, GameState, KillerStrategy, Narration } from '@murder-loop-ai/shared';
 
 export interface TurnBlackboard {
   input: string;
@@ -84,87 +84,26 @@ function planAlreadyHandlesSelfCare(plan: ActionPlan) {
   return plan.actions.some((action) => action.intent === 'self_care' && action.target === 'self');
 }
 
-function repairSelfInjuryCheck(input: string, plan: ActionPlan, blackboard: TurnBlackboard): ActionPlan {
-  if (!hasSelfInjuryCheck(input) || planAlreadyHandlesSelfCare(plan)) return plan;
-
-  blackboard.warnings.push('action plan verifier repaired a self-injury check that was parsed as a passive action.');
-  const selfCareAction: ParsedAction = {
-    id: `repair-self-care-${Date.now()}`,
-    raw: input,
-    intent: 'self_care',
-    target: 'self',
-    method: '摸索后脑勺并检查是否有伤口、出血或明显疼痛',
-    confidence: Math.max(plan.confidence, 0.82),
-    timeCost: Math.max(1, Math.min(plan.actions[0]?.timeCost ?? 1, 2)),
-    noise: Math.min(plan.actions[0]?.noise ?? 0, 1),
-    risk: 'low',
-  };
-
-  return {
-    ...plan,
-    summary: '检查自己的伤口和身体状态',
-    actions: [
-      selfCareAction,
-      ...plan.actions.filter((action) => action.intent !== 'wait' && action.intent !== 'unknown'),
-    ].slice(0, 8),
-    confidence: Math.max(plan.confidence, 0.82),
-    warnings: [...plan.warnings, '系统已将检查自身伤口的输入修正为 self_care。'],
-  };
-}
-
 export function verifyActionPlan(input: string, plan: ActionPlan, blackboard: TurnBlackboard): ActionPlan {
-  plan = repairSelfInjuryCheck(input, plan, blackboard);
-
-  if (!hasOpenDoorNegation(input)) {
-    blackboard.artifacts.actionPlan = plan;
-    return plan;
+  if (hasSelfInjuryCheck(input) && !planAlreadyHandlesSelfCare(plan)) {
+    blackboard.warnings.push('action plan verifier flagged a possible self-injury check, but did not rewrite the AI plan.');
   }
 
-  const filtered = plan.actions.filter((action) => action.intent !== 'open_door');
-  if (filtered.length === plan.actions.length) {
-    blackboard.artifacts.actionPlan = plan;
-    return plan;
+  if (hasOpenDoorNegation(input) && plan.actions.some((action) => action.intent === 'open_door')) {
+    blackboard.warnings.push('action plan verifier flagged an open_door action that conflicts with the player\'s negation, but did not rewrite the AI plan.');
   }
 
-  blackboard.warnings.push('行动解析验证器移除了与“不要开门”冲突的 open_door 动作。');
-  const repaired: ActionPlan = {
-    ...plan,
-    summary: filtered.map((action) => action.method).join('；') || '保持门关闭并谨慎观察',
-    actions: filtered.length ? filtered : [{
-      id: `repair-${Date.now()}`,
-      raw: input,
-      intent: 'inspect',
-      target: 'front_door',
-      method: '保持门关闭，隔着猫眼观察门外',
-      confidence: 0.72,
-      timeCost: 2,
-      noise: 0,
-      risk: 'medium',
-    }],
-    warnings: [...plan.warnings, '系统已按“不要开门”的明确意图修正解析结果。'],
-  };
-  blackboard.artifacts.actionPlan = repaired;
-  return repaired;
+  blackboard.artifacts.actionPlan = plan;
+  return plan;
 }
 
 export function verifyKillerStrategy(state: GameState, strategy: KillerStrategy, blackboard: TurnBlackboard): KillerStrategy {
-  const impossibleDirectEntry = strategy.type === 'spare_key_entry' && Boolean(state.room.front_door.state.barricaded);
-  if (!impossibleDirectEntry) {
-    blackboard.artifacts.killerStrategy = strategy;
-    return strategy;
+  if (strategy.type === 'spare_key_entry' && Boolean(state.room.front_door.state.barricaded)) {
+    blackboard.warnings.push('killer strategy verifier flagged spare_key_entry against a barricaded door, but did not rewrite the AI strategy.');
   }
 
-  blackboard.warnings.push('凶手策略验证器降级了与当前门防御冲突的备用钥匙强入。');
-  const repaired: KillerStrategy = {
-    id: `repair-killer-${Date.now()}`,
-    type: 'landlord_excuse',
-    title: '门外换了借口',
-    rationale: '门已形成明显阻挡，直接备用钥匙进入不够现实，改为低风险试探。',
-    visibleToPlayer: true,
-    risk: 'medium',
-  };
-  blackboard.artifacts.killerStrategy = repaired;
-  return repaired;
+  blackboard.artifacts.killerStrategy = strategy;
+  return strategy;
 }
 
 export function verifyNarration(narration: Narration, fallback: Narration, blackboard: TurnBlackboard, slot: 'actionNarration' | 'ambientNarration'): Narration {
@@ -177,9 +116,9 @@ export function verifyNarration(narration: Narration, fallback: Narration, black
     return narration;
   }
 
-  blackboard.warnings.push(`${slot} 验证器拦截了开发词或内部 id 泄漏，改用安全叙事。`);
-  blackboard.artifacts[slot] = fallback;
-  return fallback;
+  blackboard.warnings.push(`${slot} 验证器检测到开发词或内部 id 泄漏，但保留 AI 原始叙事。`);
+  blackboard.artifacts[slot] = narration;
+  return narration;
 }
 
 function clampScore(value: number) {
@@ -216,6 +155,13 @@ export function heuristicDirectorScore(
     issues.push('叙事越过限知视角，替玩家或凶手解释心理。');
     infoSafety -= 22;
     ruleConsistency -= 15;
+  }
+
+  // 信息边界：沈知夏开局不知道包裹里是毒品——叙事/clue 不能替她下结论
+  if (/毒品|冰毒|海洛因|违禁品|走私货|贩毒/.test(text)) {
+    issues.push('叙事或线索过早出现了玩家尚不知情的定性词（毒品/违禁品/走私等）。');
+    infoSafety -= 40;
+    ruleConsistency -= 25;
   }
 
   if (slot === 'action') {

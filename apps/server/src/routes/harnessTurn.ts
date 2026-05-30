@@ -12,6 +12,17 @@ import {
 } from '@murder-loop-ai/shared';
 import { completeRoleJson } from '../ai/openaiClient';
 import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNarration } from '../ai/turnCoordinator';
+import { normalizeActionPlanJson, unwrapJsonObject } from '../ai/unwrapJsonObject';
+
+interface HarnessTurnRouteOptions {
+  createAiAdapters?: (input: string, state: GameState) => {
+    aiAdapters: AiAdapters;
+    coordination?: {
+      warnings?: string[];
+      judgements?: Record<string, unknown>;
+    };
+  };
+}
 
 // ============================================================================
 // 剧情上下文 & 前情提要
@@ -41,6 +52,104 @@ function generateRecap(state: GameState): string {
   }
 
   return `第 ${state.run} 次循环。`;
+}
+
+function phaseFromEnding(ending: NonNullable<GameState['ending']>): GameState['phase'] {
+  return ending.includes('survived') || ending === 'perfect_truth' || ending === 'escaped_without_truth' || ending === 'framed_survivor'
+    ? 'survived'
+    : 'death';
+}
+
+function isNarratedEndingSupported(
+  ending: NonNullable<GameState['ending']>,
+  finalState: GameState,
+  plan?: ActionPlan,
+): boolean {
+  const didEscape = plan?.actions.some((action) => action.intent === 'escape') ?? false;
+  const didOpenExit = Boolean(finalState.room.front_door.state.opened) || Boolean(finalState.room.window.state.opened);
+  const hasEvidence = finalState.clues.some(c => c.id === 'package_photo')
+    || finalState.clues.some(c => c.id === 'linyue_has_photo')
+    || Boolean(finalState.room.phone.state.recording)
+    || Boolean(finalState.room.package.state.backedUp);
+  const policeTrusted = finalState.policePhase === 'real_police_en_route' || finalState.policePhase === 'arrived'
+    || finalState.clues.some(c => c.id === 'police_verified');
+  const killerDown = finalState.killerStatus === 'dead' || finalState.killerStatus === 'arrested' || finalState.killerStatus === 'fled';
+
+  switch (ending) {
+    case 'escaped_without_truth':
+      return didEscape && didOpenExit;
+    case 'survived_with_evidence':
+    case 'perfect_truth':
+    case 'framed_survivor':
+      return hasEvidence || policeTrusted;
+    case 'killer_dead_with_evidence':
+      return finalState.killerStatus === 'dead' && hasEvidence;
+    case 'killer_dead_no_evidence':
+      return finalState.killerStatus === 'dead';
+    case 'killer_arrested':
+      return finalState.killerStatus === 'arrested' || policeTrusted;
+    case 'killer_fled':
+      return finalState.killerStatus === 'fled' || (didEscape && didOpenExit);
+    default:
+      return killerDown || didOpenExit || policeTrusted || hasEvidence;
+  }
+}
+
+function applyNarrationOutcomeHints(
+  finalState: GameState,
+  plan?: ActionPlan,
+  actionNarration?: Narration | null,
+  ambientNarration?: Narration | null,
+): string[] {
+  const warnings: string[] = [];
+  const decisiveNarration = actionNarration?.ending || actionNarration?.isFatal || actionNarration?.killerKilled
+    ? actionNarration
+    : ambientNarration;
+
+  if (decisiveNarration?.ending) {
+    if (isNarratedEndingSupported(decisiveNarration.ending, finalState, plan)) {
+      finalState.ending = decisiveNarration.ending;
+      finalState.phase = phaseFromEnding(decisiveNarration.ending);
+      warnings.push(`narrated ending accepted: ${decisiveNarration.ending}`);
+      return warnings;
+    }
+    warnings.push(`narrated ending rejected: ${decisiveNarration.ending} was not supported by resolved events.`);
+  }
+
+  if (actionNarration?.isFatal || ambientNarration?.isFatal) {
+    finalState.ending = null;
+    finalState.phase = 'death';
+    finalState.score = null;
+    finalState.log = [
+      ...finalState.log,
+      {
+        id: `death-ai-${Date.now()}`,
+        run: finalState.run,
+        minute: finalState.minute,
+        title: decisiveNarration?.title ?? '最后一秒',
+        text: decisiveNarration?.text ?? '这一轮在一瞬间断掉了。',
+        tone: 'death',
+        channel: 'action',
+        isAiNarration: true,
+      },
+    ];
+    warnings.push('fatal narration accepted: state marked as death from AI narration.');
+  }
+
+  if (actionNarration?.killerKilled || ambientNarration?.killerKilled) {
+    finalState.killerStatus = 'dead';
+    finalState.combatTriggered = true;
+    warnings.push('killerKilled narration accepted: killer status updated from AI narration.');
+  }
+
+  return warnings;
+}
+
+async function buildSidebarPayload(harness: ReturnType<typeof createHarness>, finalState: GameState) {
+  const sidebarAgent = harness.registry.getAgent('sidebar');
+  return sidebarAgent
+    ? await harness.registry.runFallback(sidebarAgent, { finalState, moodSignal: undefined })
+    : null;
 }
 
 // ============================================================================
@@ -120,43 +229,21 @@ async function directPlot(state: GameState): Promise<PlotGuidance | null> {
 // ============================================================================
 
 async function parseActionAi(input: string, state: GameState): Promise<ActionPlan> {
-  const { fallbackParseAction } = await import('@murder-loop-ai/game-core');
-  const fallback = fallbackParseAction(input);
   const blackboard = createTurnBlackboard(input, state);
-  const ai = await completeRoleJson('parse', [
-    '你是行动解析 AI。把玩家自然语言输入拆成结构化 JSON。',
-    '',
-    '【硬规则——违反即失败】',
-    '1. 禁止答非所问。动词必须映射到最接近的 intent：',
-    '   追/冲/追上去/冲出门 → escape (target=front_door)',
-    '   砍/杀/捅/刺/打/攻击/搏斗 → attack (target=chen_huaimin)',
-    '   砸/殴打/揍 → attack',
-    '   拿起/捡起/找到/翻出 → pick_up',
-    '   用胶带/用急救包/充电/包扎 → use_item',
-    '   绝不因"不确定"而选 wait。',
-    '2. 尊重否定词。不开门/不要开门 → 绝不能解析成 open_door。',
-    '3. 道具合理性：普通租客房间里不会有枪/炸弹/闪光弹。',
-    '   如果玩家声称用枪/炸弹 → confidence < 0.3，warnings 注明"不合理道具"。',
-    '   厨房刀/剪刀/台灯/雨伞 → 合理武器，正常解析。',
-    '4. 只解析玩家明确要做的事，不替玩家补全操作，不制造事实。',
-    '',
-    '【优先智斗】玩家想设陷阱、用道具智取、误导杀手、制造假象时，用 deceive intent。不要什么都解析成 attack。',
-    'intent 枚举值：inspect secure_entry record communicate call_police verify_identity deceive hide_evidence preserve_evidence open_door self_care wait escape attack pick_up use_item unknown',
-    '',
-    '输出 JSON（全部必填）：',
-    '{"id":"xxx","raw":"玩家原文","summary":"一句话","actions":[{"id":"act-1","raw":"原文","intent":"枚举值","target":"目标","method":"方式","confidence":0.9,"timeCost":1,"noise":3,"risk":"low|medium|high"}],"confidence":0.9,"warnings":[]}',
-    '可选字段：如果 attack intent 且有武器，加 "weaponId":"kitchen_knife" 到 action 上。',
-    '如果 pick_up/use_item intent，加 "itemId":"tape" 到 action 上。',
-  ].join('\n'), { input, state, fallbackShape: fallback }, { temperature: 0.25 });
+  const { buildParseSystemPrompt } = await import('../ai/parserPrompt');
+  const ai = await completeRoleJson('parse',
+    buildParseSystemPrompt({ combatWeapons: true }),
+    { input, state },
+    { temperature: 0.25 },
+  );
   if (!ai) throw new Error('parse AI returned null');
-  const parsed = ActionPlanSchema.safeParse(ai);
+  const parsed = ActionPlanSchema.safeParse(normalizeActionPlanJson(ai));
   if (!parsed.success) throw new Error(`parse schema: ${parsed.error.message}`);
   return verifyActionPlan(input, parsed.data, blackboard);
 }
 
-async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<KillerStrategy> {
-  const { chooseFallbackKillerStrategy, projectKillerVisibleState } = await import('@murder-loop-ai/game-core');
-  const fallback = chooseFallbackKillerStrategy(state);
+async function killerStrategyAi(state: GameState, plan?: ActionPlan, playerResult?: RuleResult): Promise<KillerStrategy> {
+  const { projectKillerVisibleState } = await import('@murder-loop-ai/game-core');
   const visible = projectKillerVisibleState(state);
   const plotCtx = buildPlotContext(state, plan);
   const killerStatusNote = state.killerStatus !== 'alive'
@@ -167,6 +254,9 @@ async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<Ki
     killerStatusNote,
     state.plotGuidance ? `【导演指引】${state.plotGuidance}` : '',
     '',
+    'You are the killer-side narrative analyst. First infer what the player just did, what the rule events confirmed, and what Chen Huaimin can reasonably know.',
+    'Do not map a single clue to a canned strategy. Photo, upload, or social posting does not automatically mean framing_pressure; consider who saw it, whether it is public, and whether Chen knows.',
+    'Director feasibility rule: the strategy must be supported by visibleState, playerResult.events, and plan. If Chen cannot know the photo was shared, he cannot directly accuse the player of hiding contraband.',
     '你是暗线导演，负责陈怀民与楼道环境的下一步压力推进。',
     '陈怀民是一个谨慎但越来越焦虑的现实罪犯。包裹证据足以毁掉他的转运链。',
     '',
@@ -179,10 +269,11 @@ async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<Ki
     '【禁止使用 power_cut——电表箱已经用烂了。用更直接的方式施压。】',
     '节奏要求：2-3回合内必须把威胁升级一级。不要磨蹭。陈怀民的时间也在流逝，23:47前必须解决。',
     '玩家连续闲置→直接 spare_key_entry 或 window_route。玩家在回复消息→优先 message_reply。',
-    '只输出 JSON，必须符合 KillerStrategySchema。',
-  ].join('\n'), { visibleState: visible, allowedShape: fallback, plan }, { temperature: 0.7 });
+    '只输出一个裸 JSON 对象，不要包在 strategy/killerStrategy/result 字段里。',
+    '必须包含且只需要这些字段：{"id":"killer-短id","type":"phone_probe|soft_knock|landlord_excuse|fake_police|spare_key_entry|window_route|framing_pressure|power_cut|lure_linyue|fake_neighbor|fake_callback|message_reply|wait_for_fatigue|retreat","title":"短标题","rationale":"为什么陈怀民在有限信息下会这么做","responseHint":"可选，若是短信/对话则写他发来的具体话","visibleToPlayer":true,"risk":"low|medium|high"}',
+  ].join('\n'), { visibleState: visible, plan, playerResult }, { temperature: 0.7 });
   if (!ai) throw new Error('killer AI returned null');
-  const parsed = KillerStrategySchema.safeParse(ai);
+  const parsed = KillerStrategySchema.safeParse(unwrapJsonObject(ai));
   if (!parsed.success) throw new Error(`killer schema: ${parsed.error.message}`);
   return verifyKillerStrategy(state, parsed.data, createTurnBlackboard('', state));
 }
@@ -230,6 +321,18 @@ async function narrateActionAi(
     '   线索不能从天而降，必须基于当前情境自然出现。不重复已有线索。',
     '   如果引入线索，在 JSON 中加 clue 字段：',
     '   {"id":"ai_gen_xxx","title":"线索标题","detail":"具体描述","weight":10}',
+    '',
+    '   【★ 信息边界——线索绝不能替玩家下结论 ★】',
+    '   沈知夏只是一个普通租客，她打开包裹看到的是：旧书、药盒、数字纸条。',
+    '   她不知道这是毒品！她只能看到"可疑的东西"、"不应该出现在包裹里的物品"。',
+    '   ❌ 禁止在线索 detail 中出现"毒品"、"冰毒"、"海洛因"、"违禁品"、"走私"等定性词。',
+    '   ✅ 正确写法：描述物理特征而非结论。',
+    '      例："书脊内侧有铅笔字迹：货在书脊" — 只写文字内容，不写"暗示毒品"。',
+    '      例："药板上的铝箔被撕开过，但药片上没有印任何品牌名" — 写客观事实。',
+    '      例："数字纸条上的数字排列不像电话号码，更像是某种编码或账目" — 写疑点而非定性。',
+    '   线索的 title 也只用描述性短语，不用"发现毒品"、"确认违禁品"等结论性标题。',
+    '   【叙事正文】同样规则适用于叙事文本 text 字段：可以写"旧书封皮内侧有一行铅笔字"，',
+    '   但不能写"这行字证明包裹里是毒品"。信息边界从开局一直维持到玩家获得确凿证据为止。',
     '4. 道具柔化：如果玩家声称使用不存在的武器（枪等），叙事自然揭示手边没有。',
     '   不硬拒绝，不假装有。用感官描写过渡：手指碰到空气/布料——什么都没有。',
     `【导演指引——必须遵守】${state.plotGuidance ? `\n${state.plotGuidance}` : '\n故事处于开局阶段。通过包裹/门外的线索自然引导玩家理解处境。'}`,
@@ -241,11 +344,10 @@ async function narrateActionAi(
     '   如果窗锁被撬开，就写窗户到底被推开没有、进来了什么、或者玩家做了什么应对。',
     '   每个场景必须有一个"落点"——哪怕结果是负面的，也要写完整。',
     '7. 严格基于 events 里的内容。不编造玩家没做的事。不替玩家写心理独白或判断。',
-    '8. 【生死判定——你来决定】如果玩家的行为会导致死亡（被捅、被勒、坠楼、失血等），',
-    '   或者杀手在场景中被致命攻击，你有权在 JSON 中设定结局：',
-    '   玩家死亡 → 加 "isFatal": true',
-    '   杀手死亡 → 加 "killerKilled": true',
-    '   不要让玩家在明显已经死了的情况下还能继续操作。',
+    '8. 【严格结局声明】只有当本回合事件已经把结局坐实时，才能声明 ending / isFatal / killerKilled。',
+    '   不能因为玩家嘴上说“我逃出去了”“我已经到手机店了”就直接给结局；必须是事件里已经完成了逃离、制服、死亡或脱险。',
+    '   可选字段：ending（escaped_without_truth|survived_with_evidence|perfect_truth|killer_dead_with_evidence|killer_dead_no_evidence|killer_arrested|killer_fled|framed_survivor|default_murder|opened_to_fake_police|window_route_death|hidden_inside_death|mutual_kill|phone_dead_helpless|suicide）',
+    '   如果玩家行为已经导致自身死亡，在 JSON 中设置 "isFatal": true；如果杀手已经被致命攻击致死，设置 "killerKilled": true。',
     '9. 文风：第一人称限知视角，写可观察事实（声音/光线/距离/动作），不写"我害怕"。',
     '   220-520 中文字符。只输出 JSON：{"title":"...","text":"..."}；如果本段自然产生关键新信息，可以额外带 1 个 clue 字段：{"id":"dyn_xxx","title":"线索标题","detail":"具体情报","weight":6}。',
   ].join('\n');
@@ -288,6 +390,10 @@ async function narrateAmbientAi(
     '6. 最后一句留钩子。让玩家想知道接下来会怎样。',
     '7. 90-240 中文字符。只输出 JSON：{"title":"...","text":"..."}；如果外部事件带来关键新信息，可以额外带 1 个 clue 字段：{"id":"dyn_xxx","title":"线索标题","detail":"具体情报","weight":6}。',
     '',
+    '   【★ 信息边界——和行动叙事一样的规则 ★】',
+    '   环境线索同样不能替玩家下结论。不使用"毒品""违禁品""走私"等玩家尚不知情的定性词。',
+    '   只描述外部现象：脚步声位置/节奏变化、门外对话碎片、楼道灯光/气味/声音异常。',
+    '',
     ambientContext,
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,
@@ -305,7 +411,7 @@ async function narrateAmbientAi(
 function createAiHarness() {
   return createHarness({
     parseAction: (input, state) => parseActionAi(input, state),
-    chooseKillerStrategy: (state, plan) => killerStrategyAi(state, plan),
+    chooseKillerStrategy: (state, plan, playerResult) => killerStrategyAi(state, plan, playerResult),
     narrateAction: (ctx, pr, kr, st) => narrateActionAi(ctx, pr, kr, st),
     narrateAmbient: (ctx, pr, kr, st) => narrateAmbientAi(ctx, pr, kr, st),
   });
@@ -439,7 +545,7 @@ function addEventClues(state: GameState, events: RuleEvent[]) {
     const title = event.kind === 'message'
       ? '通讯异常'
       : event.kind === 'threat'
-        ? '外部压力变化'
+        ? '动态线索'
         : '现场状态变化';
     const specificTitle = event.sensoryHints[0] ? `${title}：${event.sensoryHints[0]}` : title;
     addDynamicClue(state, {
@@ -472,7 +578,7 @@ function toFrontendNode(entry: StoryLogEntry): FrontendStoryNode {
 // 路由
 // ============================================================================
 
-export async function harnessTurnRoute(app: FastifyInstance) {
+export async function harnessTurnRoute(app: FastifyInstance, options: HarnessTurnRouteOptions = {}) {
   app.post('/api/harness/turn', async (request) => {
     const body = request.body as { input?: string; state?: GameState };
     const input = body.input?.trim() ?? '';
@@ -486,55 +592,43 @@ export async function harnessTurnRoute(app: FastifyInstance) {
     }
 
     if (!input) {
+      const sidebar = await buildSidebarPayload(createAiHarness(), state);
       return {
         coreState: state, time: minuteLabel(state.minute), location: '青荷公寓 503 室',
         phase: state.phase, clues: toFrontendClues(state),
+        ending: state.ending,
+        deathTitle: null,
+        deathSummary: null,
+        deathMethod: null,
+        recap: generateRecap(state),
+        sidebar,
         storyLog: [] satisfies FrontendStoryNode[],
         coordination: { warnings: [], trace: [], judgements: {} },
       };
     }
 
-    const harness = createAiHarness();
+    const adapterBundle = options.createAiAdapters?.(input, state);
+    const harness = adapterBundle ? createHarness(adapterBundle.aiAdapters) : createAiHarness();
+    const routeWarnings = [...(adapterBundle?.coordination?.warnings ?? [])];
+    const routeJudgements = adapterBundle?.coordination?.judgements ?? {};
 
     const recap = generateRecap(state);
 
     const beforeLen = state.log.length;
     const resolution = await resolveTurnHarness(state, input, harness);
 
-    // ---- AI 生死判定：叙事 AI 说了算，规则引擎只执行 ----
-    if (!resolution.finalState.ending) {
-      const fatalNarration = resolution.actionNarration?.isFatal || resolution.ambientNarration?.isFatal;
-      const killerDeadByAI = resolution.actionNarration?.killerKilled || resolution.ambientNarration?.killerKilled;
-      if (fatalNarration) {
-        resolution.finalState.ending = 'default_murder';
-        resolution.finalState.phase = 'death';
-        resolution.finalState.log.push({
-          id: `ai-death-${Date.now()}`,
-          run: resolution.finalState.run,
-          minute: resolution.finalState.minute,
-          title: resolution.actionNarration?.title || '死亡',
-          text: resolution.actionNarration?.text || '一切归于黑暗。',
-          tone: 'death',
-          channel: 'action',
-        });
-      }
-      if (killerDeadByAI && resolution.finalState.killerStatus === 'alive') {
-        resolution.finalState.killerStatus = 'dead';
-        resolution.finalState.combatTriggered = true;
-      }
-    }
+    routeWarnings.push(...applyNarrationOutcomeHints(
+      resolution.finalState,
+      resolution.plan,
+      resolution.actionNarration,
+      resolution.ambientNarration,
+    ));
 
     addTurnDynamicClues(resolution);
 
-    const sidebarAgent = harness.registry.getAgent('sidebar');
-    const sidebar = sidebarAgent
-      ? await harness.registry.runFallback(sidebarAgent, { finalState: resolution.finalState, moodSignal: undefined })
-      : null;
+    const sidebar = await buildSidebarPayload(harness, resolution.finalState);
 
     const endingEntry = resolution.finalState.ending ? resolution.finalState.log[resolution.finalState.log.length - 1] : null;
-    const deathMethod = resolution.finalState.ending
-      ? ({ default_murder: '锁芯轻响，门缝里的光先于脚步进入房间。', opened_to_fake_police: '你给了门缝。', window_route_death: '雨棚比想象中更滑。', hidden_inside_death: '呼吸声从更近的地方响起。', framed_survivor: '证据替别人说话。', escaped_without_truth: '真相留在503。', survived_with_evidence: '房间从孤岛变成现场。', perfect_truth: '证据链闭合。', killer_dead_with_evidence: '刀落在瓷砖上。证据比你更早抵达外面。', killer_dead_no_evidence: '陈怀民不再动了——但你没有证据证明他该死。', killer_arrested: '警笛声由远及近。这一次，戴上手铐的是他。', killer_fled: '脚步声向下远去，消失在雨里。他逃了，但你也安全了。', mutual_kill: '两具身体倒在走廊里。23:47还没到，但503已经空了。', phone_dead_helpless: '屏幕黑了。在这个时间点，没有手机意味着什么都做不了。' } as Record<string, string>)[resolution.finalState.ending] : null;
-
     const trace = harness.dispatcher.getTrace().map(e => ({
       taskId: e.eventType, source: e.source, warnings: e.warnings, durationMs: e.durationMs,
     }));
@@ -560,13 +654,13 @@ export async function harnessTurnRoute(app: FastifyInstance) {
       clues: toFrontendClues(resolution.finalState), ending: resolution.finalState.ending,
       deathTitle: resolution.finalState.phase === 'death' ? endingEntry?.title ?? '23:47' : null,
       deathSummary: resolution.finalState.phase === 'death' ? endingEntry?.text ?? null : null,
-      deathMethod, score: resolution.finalState.score,
+      deathMethod: null, score: resolution.finalState.score,
       storyLog: [
         { id: `input-${Date.now()}`, type: 'player_input', content: input },
         ...resolution.finalState.log.slice(beforeLen).map(toFrontendNode),
       ] satisfies FrontendStoryNode[],
       turn: { plan: resolution.plan, killerStrategy: resolution.killerStrategy, actionNarration: resolution.actionNarration ?? resolution.narration, ambientNarration: resolution.ambientNarration ?? null },
-      coordination: { warnings: trace.flatMap(t => t.warnings), trace, judgements: {} },
+      coordination: { warnings: [...routeWarnings, ...trace.flatMap(t => t.warnings)], trace, judgements: routeJudgements },
       sidebar,
     };
   });

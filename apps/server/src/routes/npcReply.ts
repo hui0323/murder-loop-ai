@@ -23,7 +23,7 @@ export async function npcReplyRoute(app: FastifyInstance) {
         'text 要自然、有潜台词，80-220 中文字符。intent/riskWarning/suggestedExternalAction 用短句。',
         '只输出 JSON：{"speaker":"linyue|police_dispatch|chen_huaimin","text":"...","intent":"...","riskWarning":"...","suggestedExternalAction":"..."}。',
       ].join('\n'),
-      { speaker, input, visibleState: body.state, fallbackShape: fallback },
+      { speaker, input, visibleState: body.state },
       { temperature: 0.62 },
     ).catch(() => null);
 
