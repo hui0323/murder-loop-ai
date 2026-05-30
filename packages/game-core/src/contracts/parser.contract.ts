@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ActionPlanSchema } from '@murder-loop-ai/ai-contracts';
 import type { ArtifactContract } from './ArtifactContract';
 
 /**
@@ -9,6 +10,6 @@ import type { ArtifactContract } from './ArtifactContract';
 export const parserContract: ArtifactContract = {
   version: '1.0.0',
   input: z.object({ input: z.string(), state: z.any() }) as ArtifactContract['input'],
-  output: z.any() as ArtifactContract['output'],
-  validate: false, // 校验由 ai-contracts 的 ActionPlanSchema 负责
+  output: ActionPlanSchema as ArtifactContract['output'],
+  validate: true,
 };

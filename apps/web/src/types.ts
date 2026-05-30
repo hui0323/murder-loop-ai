@@ -46,7 +46,15 @@ export interface DirectorScore {
 export interface CoordinationState {
   warnings: string[];
   facts?: unknown;
-  directorScores: DirectorScore[];
+  directorScores?: DirectorScore[];
+  trace?: Array<{
+    taskId: string;
+    source: string;
+    decision?: string;
+    warnings: string[];
+    durationMs: number;
+  }>;
+  judgements?: Record<string, unknown>;
 }
 
 export interface GameState {

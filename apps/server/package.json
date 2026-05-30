@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/routes/harnessTurn.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

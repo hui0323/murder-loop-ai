@@ -3,7 +3,6 @@ import {
   createFallbackAmbientNarration,
   sanitizeNarration,
 } from '../narration/fallbackNarration';
-import { buildNarrationContext } from '../narration/buildNarrationContext';
 import type { AgentRegistration } from '../events/AgentRegistry';
 import { narratorContract } from '../contracts/narrator.contract';
 import type { GameState, TurnResolution } from '@murder-loop-ai/shared';
@@ -20,7 +19,7 @@ import type { GameState, TurnResolution } from '@murder-loop-ai/shared';
  */
 export const NarratorAgent: AgentRegistration = {
   id: 'narrator',
-  subscriptions: [{ event: 'KillerActed', priority: 70 }],
+  subscriptions: [{ event: 'NarrationRequested', priority: 70 }],
   contract: narratorContract,
   handler: async (_input: unknown) => {
     // AI handler 由服务端 adapter 在 createHarness 时注入
@@ -40,11 +39,6 @@ export const NarratorAgent: AgentRegistration = {
     return {
       actionNarration: sanitizeNarration(rawAction),
       ambientNarration: sanitizeNarration(rawAmbient),
-      context: buildNarrationContext(
-        payload.playerResult ?? payload.killerResult,
-        payload.killerResult,
-        '',
-      ),
     };
   },
   mode: 'fallback',

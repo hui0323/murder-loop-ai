@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/events/HarnessDispatcher.test.ts && tsx src/loop/resolveTurnHarness.test.ts"
   },
   "dependencies": {
     "@murder-loop-ai/shared": "0.1.0",

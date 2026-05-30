@@ -1,4 +1,11 @@
-import type { ActionPlan, GameState, KillerStrategy, Narration, TurnResolution } from '@murder-loop-ai/shared';
+import type {
+  ActionPlan,
+  GameState,
+  KillerStrategy,
+  Narration,
+  NarrationContext,
+  TurnResolution,
+} from '@murder-loop-ai/shared';
 
 /**
  * 游戏中所有事件类型。
@@ -9,6 +16,7 @@ export type GameEventType =
   | 'ActionParsed'
   | 'RulesApplied'
   | 'KillerActed'
+  | 'NarrationRequested'
   | 'NarrationDone'
   | 'NarrationRewriteRequested'
   | 'HighRiskScenarioDetected'
@@ -25,9 +33,25 @@ export type GameEventType =
 export interface GameEventPayloads {
   PlayerActionSubmitted: { input: string; state: GameState };
   ActionParsed: { plan: ActionPlan; state: GameState };
-  RulesApplied: { playerResult: TurnResolution['playerResult'] };
+  RulesApplied: {
+    playerResult: TurnResolution['playerResult'];
+    state: GameState;
+    plan?: ActionPlan;
+  };
   KillerActed: { killerStrategy: KillerStrategy; playerResult: TurnResolution['playerResult']; state: GameState };
-  NarrationDone: { actionNarration: Narration; ambientNarration: Narration; state: GameState };
+  NarrationRequested: {
+    plan: ActionPlan;
+    playerResult: TurnResolution['playerResult'];
+    killerResult: TurnResolution['killerResult'];
+    state: GameState;
+    narrationContext?: NarrationContext;
+  };
+  NarrationDone: {
+    narration: Narration;
+    actionNarration: Narration;
+    ambientNarration: Narration;
+    state: GameState;
+  };
   NarrationRewriteRequested: { reason: string; previousNarration: Narration; state: GameState };
   HighRiskScenarioDetected: { scenario: string; state: GameState };
   TurnCompleted: { finalState: GameState; moodSignal?: string };
@@ -36,6 +60,26 @@ export interface GameEventPayloads {
   SurvivalTriggered: { state: GameState; endingId: string };
   LoopRewound: { state: GameState; previousRun: number };
 }
+
+export interface GameCommandResults {
+  PlayerActionSubmitted: ActionPlan;
+  ActionParsed: TurnResolution['playerResult'];
+  RulesApplied: KillerStrategy;
+  KillerActed: TurnResolution['killerResult'];
+  NarrationRequested: {
+    actionNarration: Narration;
+    ambientNarration: Narration;
+  };
+  NarrationDone: {
+    score: unknown;
+    passed: boolean;
+    violations: string[];
+    moodSignal?: string;
+  };
+  TurnCompleted: unknown;
+}
+
+export type GameCommandType = keyof GameCommandResults & GameEventType;
 
 /**
  * 通用事件对象。

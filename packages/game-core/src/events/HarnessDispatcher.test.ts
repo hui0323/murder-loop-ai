@@ -1,0 +1,162 @@
+import assert from 'node:assert/strict';
+import { z } from 'zod';
+import { GameEventBus } from './EventBus';
+import { AgentRegistry, type AgentRegistration } from './AgentRegistry';
+import { HarnessDispatcher } from './HarnessDispatcher';
+import { RuleAgent } from '../agents/RuleAgent';
+import { fallbackParseAction } from '../actions/fallbackParser';
+import { createInitialGameState } from '../state/createInitialState';
+
+const baseContract = {
+  version: '1.0.0',
+  input: z.any(),
+  output: z.object({ value: z.string() }),
+  validate: true,
+};
+
+function createAgent(overrides: Partial<AgentRegistration>): AgentRegistration {
+  return {
+    id: 'parser',
+    subscriptions: [{ event: 'PlayerActionSubmitted', priority: 10 }],
+    contract: baseContract,
+    handler: async () => ({ value: 'ai' }),
+    fallback: async () => ({ value: 'fallback' }),
+    mode: 'ai',
+    ...overrides,
+  };
+}
+
+async function testCommandUsesPrimaryAgentResult() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({}));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  const result = await dispatcher.runCommand('PlayerActionSubmitted', {
+    input: 'look around',
+    state: {} as never,
+  });
+
+  assert.deepEqual(result, { value: 'ai' });
+  assert.equal(dispatcher.getTrace()[0].agentId, 'parser');
+  assert.equal(dispatcher.getTrace()[0].source, 'ai');
+}
+
+async function testCommandFallsBackWhenAiThrows() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({
+    handler: async () => {
+      throw new Error('ai down');
+    },
+  }));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  const result = await dispatcher.runCommand('PlayerActionSubmitted', {
+    input: 'look around',
+    state: {} as never,
+  });
+
+  assert.deepEqual(result, { value: 'fallback' });
+  assert.equal(dispatcher.getTrace()[0].source, 'fallback');
+  assert.match(dispatcher.getTrace()[0].warnings[0], /ai down/);
+}
+
+async function testCommandFallsBackWhenAiViolatesContract() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({
+    handler: async () => ({ wrong: true }),
+  }));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  const result = await dispatcher.runCommand('PlayerActionSubmitted', {
+    input: 'look around',
+    state: {} as never,
+  });
+
+  assert.deepEqual(result, { value: 'fallback' });
+  assert.equal(dispatcher.getTrace()[0].source, 'fallback');
+  assert.match(dispatcher.getTrace()[0].warnings[0], /output violation|parser.*output/i);
+}
+
+async function testFallbackModeTraceUsesFallbackSource() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({ mode: 'fallback' }));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  const result = await dispatcher.runCommand('PlayerActionSubmitted', {
+    input: 'look around',
+    state: {} as never,
+  });
+
+  assert.deepEqual(result, { value: 'fallback' });
+  assert.equal(dispatcher.getTrace()[0].source, 'fallback');
+}
+
+async function testFallbackModeFailureTraceUsesFallbackSource() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({
+    fallback: async () => ({ wrong: true }),
+    mode: 'fallback',
+  }));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  await assert.rejects(
+    () => dispatcher.runCommand('PlayerActionSubmitted', {
+      input: 'look around',
+      state: {} as never,
+    }),
+    /output violation/,
+  );
+  assert.equal(dispatcher.getTrace()[0].source, 'fallback');
+}
+
+async function testCommandRejectsInvalidFallbackOutput() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register(createAgent({
+    handler: async () => {
+      throw new Error('ai down');
+    },
+    fallback: async () => ({ wrong: true }),
+  }));
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  await assert.rejects(
+    () => dispatcher.runCommand('PlayerActionSubmitted', {
+      input: 'look around',
+      state: {} as never,
+    }),
+    /output violation/,
+  );
+}
+
+async function testRuleAgentRejectsMalformedDeterministicOutput() {
+  const bus = new GameEventBus();
+  const registry = new AgentRegistry(bus);
+  registry.register({
+    ...RuleAgent,
+    fallback: async () => ({ wrong: true }),
+  });
+  const dispatcher = new HarnessDispatcher(bus, registry);
+
+  await assert.rejects(
+    () => dispatcher.runCommand('ActionParsed', {
+      plan: fallbackParseAction('check the package'),
+      state: createInitialGameState(),
+    }),
+    /rule.*output violation/i,
+  );
+  assert.equal(dispatcher.getTrace()[0].source, 'fallback');
+}
+
+await testCommandUsesPrimaryAgentResult();
+await testCommandFallsBackWhenAiThrows();
+await testCommandFallsBackWhenAiViolatesContract();
+await testFallbackModeTraceUsesFallbackSource();
+await testFallbackModeFailureTraceUsesFallbackSource();
+await testCommandRejectsInvalidFallbackOutput();
+await testRuleAgentRejectsMalformedDeterministicOutput();

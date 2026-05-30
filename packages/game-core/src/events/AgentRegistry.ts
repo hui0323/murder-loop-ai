@@ -1,4 +1,4 @@
-import type { ArtifactContract } from '../contracts/ArtifactContract';
+import { enforce, type ArtifactContract } from '../contracts/ArtifactContract';
 import type { GameEventBus } from './EventBus';
 import type { EventHandler, GameEvent, GameEventType } from './eventTypes';
 
@@ -31,6 +31,13 @@ export interface AgentRegistration {
   mode: 'ai' | 'fallback';
 }
 
+function cloneAgent(agent: AgentRegistration): AgentRegistration {
+  return {
+    ...agent,
+    subscriptions: agent.subscriptions.map((subscription) => ({ ...subscription })),
+  };
+}
+
 /**
  * Agent 注册中心 — 管理所有 Agent 的生命周期和事件订阅。
  *
@@ -57,10 +64,11 @@ export class AgentRegistry {
     if (this.agents.has(agent.id)) {
       throw new Error(`Agent "${agent.id}" is already registered`);
     }
-    this.agents.set(agent.id, agent);
+    const registered = cloneAgent(agent);
+    this.agents.set(registered.id, registered);
 
-    for (const sub of agent.subscriptions) {
-      const unsubscribe = this.bus.subscribe(sub.event, this.createHandler(agent), sub.priority);
+    for (const sub of registered.subscriptions) {
+      const unsubscribe = this.bus.subscribe(sub.event, this.createHandler(registered), sub.priority);
       this.unsubscribers.push(unsubscribe);
     }
   }
@@ -122,14 +130,30 @@ export class AgentRegistry {
     this.agents.clear();
   }
 
+  async runAgent(agent: AgentRegistration, payload: unknown, event?: GameEvent): Promise<unknown> {
+    const fn = agent.mode === 'ai' ? agent.handler : agent.fallback;
+    const guarded = enforce(
+      agent.contract,
+      (input: unknown) => fn(input, event),
+      agent.id,
+    );
+    return guarded(payload);
+  }
+
+  async runFallback(agent: AgentRegistration, payload: unknown, event?: GameEvent): Promise<unknown> {
+    const guarded = enforce(
+      agent.contract,
+      (input: unknown) => agent.fallback(input, event),
+      agent.id,
+    );
+    return guarded(payload);
+  }
+
   /**
    * 为 Agent 创建事件处理器。
    * 根据 Agent 当前模式选择 handler 或 fallback。
    */
   private createHandler(agent: AgentRegistration): EventHandler {
-    return async (event: GameEvent) => {
-      const fn = agent.mode === 'ai' ? agent.handler : agent.fallback;
-      return fn(event.payload, event);
-    };
+    return async (event: GameEvent) => this.runAgent(agent, event.payload, event);
   }
 }

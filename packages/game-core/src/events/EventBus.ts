@@ -59,13 +59,7 @@ export class GameEventBus {
     payload: GameEvent<T>['payload'],
     parentId?: string,
   ): Promise<unknown[]> {
-    const event: GameEvent = {
-      type,
-      payload,
-      timestamp: performance.now(),
-      parentId,
-      id: `evt-${++this.idCounter}-${type}`,
-    } as GameEvent;
+    const event = this.createEvent(type, payload, parentId);
 
     const handlers = this.subscriptions
       .filter((s) => s.event === type)
@@ -82,8 +76,26 @@ export class GameEventBus {
       }
     }
 
-    this.addToLog(event, results, performance.now() - startTime);
+    this.recordEvent(event, results, performance.now() - startTime);
     return results;
+  }
+
+  createEvent<T extends GameEventType>(
+    type: T,
+    payload: GameEvent<T>['payload'],
+    parentId?: string,
+  ): GameEvent<T> {
+    return {
+      type,
+      payload,
+      timestamp: performance.now(),
+      parentId,
+      id: `evt-${++this.idCounter}-${type}`,
+    } as GameEvent<T>;
+  }
+
+  recordEvent(event: GameEvent, results: unknown[], durationMs: number): void {
+    this.addToLog(event, results, durationMs);
   }
 
   /**

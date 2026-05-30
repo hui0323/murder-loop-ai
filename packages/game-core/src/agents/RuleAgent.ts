@@ -1,7 +1,8 @@
 import { applyPlayerActions } from '../rules/applyPlayerActions';
 import { applyKillerStrategy } from '../killer/applyKillerStrategy';
 import type { AgentRegistration } from '../events/AgentRegistry';
-import type { ActionPlan, GameState, KillerStrategy, TurnResolution } from '@murder-loop-ai/shared';
+import type { ActionPlan, GameState, KillerStrategy } from '@murder-loop-ai/shared';
+import { ruleContract } from '../contracts/rule.contract';
 
 /**
  * 规则系统 Agent。
@@ -15,12 +16,7 @@ export const RuleAgent: AgentRegistration = {
     { event: 'ActionParsed', priority: 20 },
     { event: 'KillerActed', priority: 60 },
   ],
-  contract: {
-    version: '1.0.0',
-    input: null as never,
-    output: null as never,
-    validate: false,
-  },
+  contract: ruleContract,
   handler: async (input: unknown, event) => {
     // RuleAgent 始终使用确定性逻辑，不调用 AI
     return RuleAgent.fallback(input, event);

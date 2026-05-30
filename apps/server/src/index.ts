@@ -8,6 +8,7 @@ import { npcReplyRoute } from './routes/npcReply';
 import { parseActionRoute } from './routes/parseAction';
 import { scoreRunRoute } from './routes/scoreRun';
 import { frontendAdapterRoute } from './routes/frontendAdapter';
+import { harnessTurnRoute } from './routes/harnessTurn';
 
 const app = Fastify({ logger: true });
 
@@ -32,6 +33,7 @@ await app.register(killerStrategyRoute);
 await app.register(narrateRoute);
 await app.register(npcReplyRoute);
 await app.register(scoreRunRoute);
+await app.register(harnessTurnRoute);
 await app.register(frontendAdapterRoute);
 
 try {

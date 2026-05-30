@@ -71,12 +71,12 @@ export default function App() {
     }));
 
     try {
-      const response = await fetch('/api/frontend/resolve-action', {
+      const response = await fetch('/api/harness/turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionText, coreState }),
+        body: JSON.stringify({ input: actionText, state: coreState }),
       });
-      if (!response.ok) throw new Error(`resolve-action failed: ${response.status}`);
+      if (!response.ok) throw new Error(`harness turn failed: ${response.status}`);
       const result = (await response.json()) as FrontendResolveResponse;
       const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
 

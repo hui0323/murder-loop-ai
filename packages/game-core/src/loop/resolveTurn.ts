@@ -20,6 +20,7 @@ import { buildNarrationContext } from '../narration/buildNarrationContext';
 import { advanceAmbientTurn } from '../ambient/advanceAmbientTurn';
 import { GameEventBus } from '../events/EventBus';
 import { AgentRegistry } from '../events/AgentRegistry';
+import { HarnessDispatcher } from '../events/HarnessDispatcher';
 import { ParserAgent } from '../agents/ParserAgent';
 import { RuleAgent } from '../agents/RuleAgent';
 import { KillerAgent } from '../agents/KillerAgent';
@@ -28,7 +29,7 @@ import { DirectorAgent } from '../agents/DirectorAgent';
 import { NpcAgent } from '../agents/NpcAgent';
 import { UIAdapterAgent } from '../agents/UIAdapterAgent';
 
-export { GameEventBus, AgentRegistry };
+export { GameEventBus, AgentRegistry, HarnessDispatcher };
 export { ParserAgent, RuleAgent, KillerAgent, NarratorAgent, DirectorAgent, NpcAgent, UIAdapterAgent };
 
 // ============================================================================
@@ -123,6 +124,11 @@ export interface TurnContext {
 export function createHarness(aiAdapters?: AiAdapters) {
   const bus = new GameEventBus();
   const registry = new AgentRegistry(bus);
+  const dispatcher = new HarnessDispatcher(bus, registry);
+  const narrationAiUsage = {
+    action: Boolean(aiAdapters?.narrateAction ?? aiAdapters?.narrate),
+    ambient: Boolean(aiAdapters?.narrateAmbient ?? aiAdapters?.narrate),
+  };
 
   // 注册所有 Agent
   registry.register(ParserAgent);
@@ -152,7 +158,7 @@ export function createHarness(aiAdapters?: AiAdapters) {
       agent.handler = async (payload: unknown, event) => {
         const ctx = payload as TurnContext;
         return aiFn(ctx.state, ctx.plan, ctx.playerResult).catch(() =>
-          agent.fallback(payload, event),
+          agent.fallback(payload, event) as Promise<KillerStrategy>,
         );
       };
       agent.mode = 'ai';
@@ -161,20 +167,33 @@ export function createHarness(aiAdapters?: AiAdapters) {
   if (aiAdapters?.narrate || aiAdapters?.narrateAction || aiAdapters?.narrateAmbient) {
     const agent = registry.getAgent('narrator');
     if (agent) {
-      const narrateFn = aiAdapters.narrateAction ?? aiAdapters.narrateAmbient ?? aiAdapters.narrate;
+      const actionNarrator = aiAdapters.narrateAction ?? aiAdapters.narrate;
+      const ambientNarrator = aiAdapters.narrateAmbient ?? aiAdapters.narrate;
       agent.handler = async (payload: unknown) => {
-        if (!narrateFn) return agent.fallback(payload);
+        if (!actionNarrator && !ambientNarrator) return agent.fallback(payload);
         const ctx = payload as TurnContext;
         const context = ctx.narrationContext ?? buildNarrationContext(ctx.playerResult!, ctx.killerResult!, ctx.plan?.summary ?? '');
-        return narrateFn(context, ctx.playerResult!, ctx.killerResult!, ctx.state).catch(() =>
-          agent.fallback(payload),
-        );
+        const fallbackPair = await agent.fallback(payload) as {
+          actionNarration: Narration;
+          ambientNarration: Narration;
+        };
+        const actionNarration = actionNarrator
+          ? await actionNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state).catch(
+              () => fallbackPair.actionNarration,
+            )
+          : fallbackPair.actionNarration;
+        const ambientNarration = ambientNarrator
+          ? await ambientNarrator(context, ctx.playerResult!, ctx.killerResult!, ctx.state).catch(
+              () => fallbackPair.ambientNarration,
+            )
+          : fallbackPair.ambientNarration;
+        return { actionNarration, ambientNarration };
       };
       agent.mode = 'ai';
     }
   }
 
-  return { bus, registry };
+  return { bus, registry, dispatcher, narrationAiUsage };
 }
 
 /**
@@ -192,43 +211,45 @@ export async function resolveTurnHarness(
   input: string,
   harness: ReturnType<typeof createHarness>,
 ): Promise<TurnResolution> {
-  const { bus } = harness;
-
   // 构建回合上下文 — 在事件链中共享的可变状态
   const ctx: TurnContext = { input, state: { ...state } };
 
   // Step 1: 解析行动
-  await bus.emit('PlayerActionSubmitted', { input, state: ctx.state });
+  const plan = await harness.dispatcher.runCommand('PlayerActionSubmitted', {
+    input,
+    state: ctx.state,
+  });
 
   // 从 ParserAgent 的 fallback 获取 plan（AI 模式通过 handler 获取）
-  const parserAgent = harness.registry.getAgent('parser');
-  const plan = (await (parserAgent?.mode === 'ai'
-    ? parserAgent.handler({ input, state: ctx.state })
-    : fallbackParseAction(input))) as ActionPlan;
   ctx.plan = plan;
 
   // Step 2: 执行规则
-  await bus.emit('ActionParsed', { plan, state: ctx.state });
-  const playerResult = applyPlayerActions(ctx.state, plan);
+  const playerResult = await harness.dispatcher.runCommand('ActionParsed', {
+    plan,
+    state: ctx.state,
+  });
   ctx.playerResult = playerResult;
   ctx.state = playerResult.state;
   const playerLogId = ctx.state.log[ctx.state.log.length - 1]?.id;
 
   // Step 3: 凶手策略
-  await bus.emit('RulesApplied', { playerResult });
-  const killerAgent = harness.registry.getAgent('killer');
   const killerStrategy = ctx.state.ending
     ? chooseFallbackKillerStrategy(ctx.state)
-    : killerAgent?.mode === 'ai'
-      ? ((await killerAgent.handler(ctx)) as KillerStrategy)
-      : chooseFallbackKillerStrategy(ctx.state);
+    : await harness.dispatcher.runCommand('RulesApplied', {
+        playerResult,
+        state: ctx.state,
+        plan,
+      });
   ctx.killerStrategy = killerStrategy;
 
   // Step 4: 执行凶手策略 + 叙事
-  await bus.emit('KillerActed', { killerStrategy, playerResult, state: ctx.state });
   const killerResult = ctx.state.ending
     ? { ...playerResult, text: '', title: '对抗结束', tone: 'system' as const, addedClues: [], timePassed: 0, threatDelta: 0, events: [] }
-    : applyKillerStrategy(ctx.state, killerStrategy);
+    : await harness.dispatcher.runCommand('KillerActed', {
+        killerStrategy,
+        playerResult,
+        state: ctx.state,
+      });
   ctx.killerResult = killerResult;
   ctx.state = killerResult.state;
   const killerLogId = ctx.state.ending ? undefined : ctx.state.log[ctx.state.log.length - 1]?.id;
@@ -237,48 +258,53 @@ export async function resolveTurnHarness(
   const narrationContext = buildNarrationContext(playerResult, killerResult, plan.summary);
   ctx.narrationContext = narrationContext;
 
-  const narratorAgent = harness.registry.getAgent('narrator');
-  let rawActionNarration: Narration;
-  let rawAmbientNarration: Narration;
-
-  if (narratorAgent?.mode === 'ai') {
-    const result = (await narratorAgent.handler(ctx)) as { actionNarration: Narration; ambientNarration: Narration };
-    rawActionNarration = result.actionNarration;
-    rawAmbientNarration = result.ambientNarration;
-  } else {
-    rawActionNarration = createFallbackActionNarration(playerResult);
-    rawAmbientNarration = ctx.state.ending
-      ? rawActionNarration
-      : createFallbackAmbientNarration(playerResult, killerResult);
-  }
-
-  const actionNarration = sanitizeNarration(rawActionNarration);
-  const ambientNarration = sanitizeNarration(rawAmbientNarration);
+  const narrationPair = await harness.dispatcher.runCommand('NarrationRequested', {
+    plan,
+    playerResult,
+    killerResult,
+    state: ctx.state,
+    narrationContext,
+  });
+  const actionNarration = sanitizeNarration(narrationPair.actionNarration);
+  const ambientNarration = playerResult.state.ending
+    ? actionNarration
+    : sanitizeNarration(narrationPair.ambientNarration);
   ctx.actionNarration = actionNarration;
   ctx.ambientNarration = ambientNarration;
 
   // Step 6: 导演评分（事件驱动）
-  await bus.emit('NarrationDone', { actionNarration, ambientNarration, state: ctx.state });
+  const directorResult = await harness.dispatcher.runCommand('NarrationDone', {
+    narration: actionNarration,
+    actionNarration,
+    ambientNarration,
+    state: ctx.state,
+  });
+  ctx.directorResult = directorResult;
 
   // Step 7: 组装最终状态
   const finalState = { ...ctx.state };
   replaceLogEntry(finalState, playerLogId, {
     title: actionNarration.title,
     text: actionNarration.text,
-    isAiNarration: narratorAgent?.mode === 'ai',
+    isAiNarration: harness.narrationAiUsage.action,
     channel: 'action',
     tone: playerResult.tone,
   });
   replaceLogEntry(finalState, killerLogId, {
     title: ambientNarration.title,
     text: ambientNarration.text,
-    isAiNarration: narratorAgent?.mode === 'ai',
+    isAiNarration: playerResult.state.ending
+      ? harness.narrationAiUsage.action
+      : harness.narrationAiUsage.ambient,
     channel: 'ambient',
     tone: killerResult.tone === 'death' ? 'death' : killerResult.tone,
   });
 
   // Step 8: 完成回合
-  await bus.emit('TurnCompleted', { finalState });
+  await harness.dispatcher.runCommand('TurnCompleted', {
+    finalState,
+    moodSignal: directorResult.moodSignal,
+  });
 
   return {
     plan,

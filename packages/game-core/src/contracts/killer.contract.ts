@@ -1,31 +1,29 @@
 import { z } from 'zod';
 import type { ArtifactContract } from './ArtifactContract';
 
-/**
- * Killer Agent 的产物契约。
- * 输入：当前游戏状态 + 玩家行动方案
- * 输出：凶手的对抗策略
- */
 export const killerStrategySchema = z.object({
+  id: z.string(),
   type: z.enum([
-    'wait',
-    'text_probe',
+    'phone_probe',
     'soft_knock',
-    'landlord_check',
-    'fake_police_pressure',
+    'landlord_excuse',
+    'fake_police',
     'spare_key_entry',
-    'power_cut',
     'window_route',
+    'framing_pressure',
+    'power_cut',
     'lure_linyue',
-    'retreat',
-    'frame_player',
-    'destroy_evidence',
+    'fake_neighbor',
+    'fake_callback',
     'message_reply',
+    'wait_for_fatigue',
+    'retreat',
   ]),
-  priority: z.number().min(0).max(10).describe('策略优先级（0最低，10最高）'),
-  description: z.string().describe('策略描述，供叙事AI使用'),
-  events: z.array(z.string()).optional().describe('策略触发的具体事件'),
-  knownInfo: z.array(z.string()).optional().describe('凶手制定此策略时所知的信息'),
+  title: z.string(),
+  rationale: z.string(),
+  responseHint: z.string().optional(),
+  visibleToPlayer: z.boolean(),
+  risk: z.enum(['low', 'medium', 'high']),
 });
 
 export const killerInputSchema = z.object({
