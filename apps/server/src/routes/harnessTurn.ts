@@ -14,6 +14,52 @@ import { completeRoleJson } from '../ai/openaiClient';
 import { createTurnBlackboard, verifyActionPlan, verifyKillerStrategy, verifyNarration } from '../ai/turnCoordinator';
 
 // ============================================================================
+// 剧情上下文 & 前情提要
+// ============================================================================
+
+function buildPlotContext(state: GameState, plan?: ActionPlan): string {
+  const recentLog = state.log.slice(-6);
+  const playerActions = recentLog.filter(l => l.channel === 'action').map(l => `- ${l.title}: ${l.text.slice(0, 60)}`);
+  const killerActions = recentLog.filter(l => l.channel === 'ambient').map(l => `- ${l.title}: ${l.text.slice(0, 60)}`);
+  const clues = state.clues.slice(-5).map(c => clueBook[c]?.title ?? c);
+
+  return [
+    `=== 剧情状态 ===`,
+    `第 ${state.run} 轮，游戏时间 23:${String(state.minute % 60).padStart(2, '0')}`,
+    `阶段: ${state.phase} | 凶手阶段: ${state.killerPhase} | 威胁: ${state.threat}/100`,
+    `线索: ${clues.join(', ') || '无'}`,
+    `玩家近期行动:`,
+    ...(playerActions.length ? playerActions : ['- 尚无']),
+    `暗线近期事件:`,
+    ...(killerActions.length ? killerActions : ['- 尚无']),
+    `本回合玩家输入: "${plan?.summary ?? '未知'}"`,
+    `=== 导演指示 ===`,
+    `剧情必须向前推进。上回合出现过的环境细节（灯光、电表箱、雨声、窗帘、楼道）这回合必须有本质变化或完全不出现。`,
+    `每次回应只推进一个明确的压力点，不要原地踏步。`,
+  ].join('\n');
+}
+
+function generateRecap(state: GameState): string {
+  const memories = state.memory.filter(m => !m.id.startsWith('checkpoint-'));
+  const keyEvents = state.log.filter(l => l.channel === 'action' && l.tone !== 'system').slice(-4);
+
+  if (memories.length === 0 && keyEvents.length === 0) {
+    return '这是你在青荷公寓503室醒来的第一个夜晚。包裹里的秘密、门外的动静、手机上的陌生号码——一切都刚刚开始。';
+  }
+
+  const lines: string[] = [];
+  if (state.run > 1) {
+    lines.push(`第 ${state.run} 次循环。上一次你死于：${memories[memories.length - 1]?.title || '未知原因'}。`);
+  }
+  for (const evt of keyEvents) {
+    lines.push(`${evt.title}：${evt.text.slice(0, 80)}`);
+  }
+  lines.push('电子钟回到 23:00。窗外的雨声和上一次没什么不同。');
+
+  return lines.join('\n');
+}
+
+// ============================================================================
 // AI Adapter — 无内部 try/catch，错误由 HarnessDispatcher 统一处理
 // ============================================================================
 
@@ -39,17 +85,17 @@ async function killerStrategyAi(state: GameState, plan?: ActionPlan): Promise<Ki
   const { chooseFallbackKillerStrategy, projectKillerVisibleState } = await import('@murder-loop-ai/game-core');
   const fallback = chooseFallbackKillerStrategy(state);
   const visible = projectKillerVisibleState(state);
+  const plotCtx = buildPlotContext(state, plan);
   const ai = await completeRoleJson('killer', [
+    plotCtx,
+    '',
     '你是暗线导演，负责陈怀民与楼道环境的下一步压力推进。',
-    '核心目标：每一回合必须向前推进剧情。不能原地踏步，不能重复上一回合的施压方式。',
-    '你只能看 visibleState。玩家没有暴露的信息你都不知道。',
-    '陈怀民是谨慎的现实罪犯，但也是被逼到墙角的困兽。包裹里的证据如果泄露，他的转运链就完了。',
+    '根据上面的剧情状态和导演指示，制定本回合的暗线行动。',
+    '陈怀民是谨慎的现实罪犯，但也是被逼到墙角的困兽。包裹证据泄露=转运链完了。',
     '压力递进路线：短信试探 → 轻敲门 → 房东借口 → 断电 → 假警察 → 假回拨 → 备用钥匙 → 窗外路线 → 暴力闯入',
-    '每个阶段持续 1-2 回合就必须升级。不要在同一阶段反复横跳。',
-    '如果上一回合已经出现过断电/灯光闪烁/电表箱响，这回合绝对不能再写同样的内容。',
+    '每个阶段持续1-2回合后必须升级。不能反复横跳。',
     '如果玩家已经拍照/备份/联系外界，陈怀民应该更焦虑、更激进。',
-    '如果玩家在回复消息，优先 message_reply 承接对话。',
-    'title 要像章节小标题，rationale 说明为什么这一步。',
+    '如果玩家在回复消息，优先 message_reply。',
     '只输出 JSON，必须符合 KillerStrategySchema。',
   ].join('\n'), { visibleState: visible, allowedShape: fallback, plan }, { temperature: 0.7 });
   if (!ai) throw new Error('killer AI returned null');
@@ -65,10 +111,13 @@ async function narrateActionAi(
   const { createFallbackActionNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackActionNarration(playerResult);
   const system = [
+    buildPlotContext(state),
+    '',
     '你是行动回应作者。只写玩家动作的落地结果，不写环境推进。',
-    '只使用 narrationContext.events 里的事实。不新增证据或 NPC。',
+    '根据上面的剧情状态，写出玩家本次行动的具体结果。',
     '文风：悬疑网文，有推进有钩子。写门锁、猫眼、手机冷光、纸箱气味、脚步距离、手上动作。',
     '必须查看 narrationContext.recentLog，严格避免复述最近两回合出现过的具体描述。',
+    '如果剧情状态里出现了相似的玩家行动，必须写出不同的细节和角度。',
     '220-520 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,
@@ -86,15 +135,14 @@ async function narrateAmbientAi(
   const { createFallbackAmbientNarration } = await import('@murder-loop-ai/game-core');
   const fallback = createFallbackAmbientNarration(playerResult, killerResult);
   const system = [
+    buildPlotContext(state),
+    '',
     '你是环境播报/暗线镜头。只写门外、楼道、手机、窗外等外部变化。',
-    '核心规则：剧情必须向前推进。每回合的环境必须和上一回合有本质不同。',
-    '绝对禁止列表——以下元素如果上一回合出现过，这回合绝对不能写：',
-    '  电表箱响、灯光闪烁、手机电量变化、雨声变大变小、楼道安静/没有脚步声、窗帘被风掀动、路灯光斜切',
-    '如果上回合写了电表箱和灯光，这回合必须写完全不同的内容：敲门声、短信提示音、窗外人影、钥匙插入锁孔的声音、对门邻居开门声、楼下警笛',
-    '不要复述玩家动作。只呈现玩家能直接感知的外部现象。',
-    '每次只推进一个压力点。安静和停顿最多持续一回合。',
+    '根据上面的剧情状态和导演指示，写出本回合的环境推进。',
+    '绝对禁止：如果上回合出现过的细节（灯光、电表箱、雨声、窗帘、楼道、脚步声），这回合必须写完全不同的内容。',
+    '可用的替代元素：敲门声、短信提示音、窗外人影、钥匙插入锁孔、对门邻居开门、楼下警笛、手机震动、对讲机电流声、电梯停靠声、消防楼梯脚步',
+    '每次只推进一个压力点。安静和停顿最多持续一回合就必须有新的事件发生。',
     '语言：悬疑网文收尾钩子，具体克制，最后一句压住下一步选择。',
-    '必须查看 narrationContext.recentLog，任何在 recentLog 中出现过的具体描述都不能重复。',
     '90-240 个中文字符。只输出 JSON：{"title":"...","text":"..."}。',
   ].join('\n');
   const ai = await completeRoleJson('narrator', system,
@@ -180,6 +228,7 @@ export async function harnessTurnRoute(app: FastifyInstance) {
     }));
 
     return {
+      recap: generateRecap(resolution.finalState),
       coreState: resolution.finalState, time: minuteLabel(resolution.finalState.minute),
       location: '青荷公寓 503 室', phase: resolution.finalState.phase,
       clues: toFrontendClues(resolution.finalState), ending: resolution.finalState.ending,
