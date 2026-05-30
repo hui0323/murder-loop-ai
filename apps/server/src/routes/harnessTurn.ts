@@ -34,20 +34,30 @@ function buildPlotContext(state: GameState, plan?: ActionPlan): string {
 
 function generateRecap(state: GameState): string {
   const memories = state.memory.filter(m => !m.id.startsWith('checkpoint-'));
-  const keyEvents = state.log.filter(l => l.channel === 'action' && l.tone !== 'system').slice(-4);
-
-  if (memories.length === 0 && keyEvents.length === 0) {
-    return '这是你在青荷公寓503室醒来的第一个夜晚。包裹里的秘密、门外的动静、手机上的陌生号码——一切都刚刚开始。';
-  }
+  const keyEvents = state.log
+    .filter(l => l.channel === 'action' && l.tone !== 'system')
+    .slice(-3);
 
   const lines: string[] = [];
-  if (state.run > 1) {
-    lines.push(`第 ${state.run} 次循环。上一次你死于：${memories[memories.length - 1]?.title || '未知原因'}。`);
+
+  // 循环信息
+  if (state.run > 1 && memories.length > 0) {
+    lines.push(`第 ${state.run} 次循环。上次死于：${memories[memories.length - 1]?.title || '未知'}`);
+  } else if (state.run === 1) {
+    lines.push('第 1 次循环。23:00，你在青荷公寓503室醒来。');
   }
-  for (const evt of keyEvents) {
-    lines.push(`${evt.title}：${evt.text.slice(0, 80)}`);
+
+  // 本循环已发生的关键事件
+  if (keyEvents.length > 0) {
+    lines.push('本循环关键事件：');
+    for (const evt of keyEvents) {
+      lines.push(`· ${evt.title}`);
+    }
   }
-  lines.push('电子钟回到 23:00。窗外的雨声和上一次没什么不同。');
+
+  if (lines.length === 0) {
+    return '新的循环开始了。';
+  }
 
   return lines.join('\n');
 }
