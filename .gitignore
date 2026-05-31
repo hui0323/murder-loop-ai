@@ -1,0 +1,11 @@
+node_modules
+.claude/
+.codex-logs/
+.DS_Store
+dist
+.env
+.env.local
+*.log
+tmp-*.png
+.vite
+coverage

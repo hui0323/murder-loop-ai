@@ -1,0 +1,336 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useEffect, useRef, useState } from 'react';
+import type { ActionAudioCue } from '@murder-loop-ai/shared';
+import { Header } from './components/Header';
+import { StoryPanel } from './components/StoryPanel';
+import { InputArea } from './components/InputArea';
+import { Sidebar } from './components/Sidebar';
+import { ClueRevealModal } from './components/ClueRevealModal';
+import { CinematicIntro } from './components/CinematicIntro';
+import { CinematicTransition } from './components/CinematicTransition';
+import { RainPlayer } from './components/RainPlayer';
+import { VolumeControl } from './components/VolumeControl';
+import { useGameAudio } from './audio/hooks';
+import { audio } from './audio/engine';
+import { Clue, GameState } from './types';
+import { Menu, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { getClueAsset } from './clueAssets';
+import { ClueReadMap, findFirstNewClue, markClueRead } from './clueRevealState';
+import { loadFrontendState, persistFrontendState, resetFrontendProgress } from './frontendState';
+
+interface FrontendResolveResponse extends Partial<GameState> {
+  coreState?: unknown;
+  storyLog?: GameState['storyLog'];
+  audioCue?: ActionAudioCue | null;
+}
+
+interface EndingCinematicPayload {
+  key: string;
+  kind: 'death' | 'survived';
+  title: string;
+  summary: string;
+  method?: string | null;
+}
+
+function shouldShowIntroCinematic(state: GameState) {
+  return state.phase === 'intro' && !state.ending;
+}
+
+export default function App() {
+  const [showCinematic, setShowCinematic] = useState(() => shouldShowIntroCinematic(loadFrontendState()));
+  const [endingCinematic, setEndingCinematic] = useState<EndingCinematicPayload | null>(null);
+  const [state, setState] = useState<GameState>(() => loadFrontendState());
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [activeClueId, setActiveClueId] = useState<string | null>(null);
+  const [readClues, setReadClues] = useState<ClueReadMap>({});
+
+  // Audio: track last turn's action intents and killer type
+  const lastActionIntents = useRef<string[]>([]);
+  const lastActionAudioCue = useRef<ActionAudioCue | null>(null);
+  const lastKillerType = useRef<string | null>(null);
+  const lastTurnCompleted = useRef(false);
+
+  const threatLevel = state.sidebar?.threat?.level ?? 0;
+  useGameAudio({
+    phase: state.phase,
+    threat: threatLevel,
+    killerType: lastKillerType.current,
+    actionIntents: lastActionIntents.current,
+    actionAudioCue: lastActionAudioCue.current,
+    isCinematic: showCinematic || Boolean(endingCinematic),
+    newClueAdded: Boolean(activeClueId),
+    turnCompleted: lastTurnCompleted.current,
+  });
+
+  useEffect(() => {
+    persistFrontendState(state);
+  }, [state]);
+
+  useEffect(() => {
+    void audio.init();
+  }, []);
+
+  const handleActionSubmit = async (actionText: string) => {
+    const newLogId = Date.now().toString();
+    const coreState = state.coreState;
+    const previousClues = state.clues;
+
+    setState(prev => ({
+      ...prev,
+      isParsing: true,
+      storyLog: [
+        ...prev.storyLog,
+        { id: `input-${newLogId}`, type: 'player_input', content: actionText }
+      ]
+    }));
+
+    try {
+      const response = await fetch('/api/harness/turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: actionText, state: coreState }),
+      });
+      if (!response.ok) throw new Error(`harness turn failed: ${response.status}`);
+      const result = (await response.json()) as FrontendResolveResponse & {
+        turn?: { plan?: { actions?: Array<{ intent: string }> }; killerStrategy?: { type: string } };
+      };
+      const resultLog = result.storyLog?.filter(node => node.type !== 'player_input') ?? [];
+      const resultClues = result.clues ?? previousClues;
+      const newClue = findFirstNewClue(previousClues, resultClues);
+
+      // Audio triggers from turn data
+      lastActionIntents.current = result.turn?.plan?.actions?.map(a => a.intent) ?? [];
+      lastActionAudioCue.current = result.audioCue ?? null;
+      lastKillerType.current = result.turn?.killerStrategy?.type ?? null;
+      lastTurnCompleted.current = true;
+      setTimeout(() => { lastTurnCompleted.current = false; }, 300);
+
+      setState(prev => {
+        const nextState: GameState = {
+          ...prev,
+          isParsing: false,
+          actionConfirmation: null,
+          time: result.time ?? prev.time,
+          location: result.location ?? prev.location,
+          phase: result.phase ?? prev.phase,
+          clues: resultClues,
+          coreState: result.coreState ?? prev.coreState,
+          ending: result.ending !== undefined ? result.ending : prev.ending,
+          deathTitle: result.deathTitle !== undefined ? result.deathTitle : prev.deathTitle,
+          deathSummary: result.deathSummary !== undefined ? result.deathSummary : prev.deathSummary,
+          deathMethod: result.deathMethod !== undefined ? result.deathMethod : prev.deathMethod,
+          coordination: result.coordination ?? prev.coordination,
+          recap: result.recap ?? prev.recap,
+          sidebar: result.sidebar ?? prev.sidebar,
+          storyLog: [...prev.storyLog, ...resultLog],
+        };
+        persistFrontendState(nextState);
+        return nextState;
+      });
+
+      if (newClue && getClueAsset(newClue.id)) {
+        setActiveClueId(newClue.id);
+      }
+
+      if (result.ending && result.ending !== state.ending) {
+        setEndingCinematic({
+          key: `${result.ending}-${Date.now()}`,
+          kind: result.phase === 'survived' ? 'survived' : 'death',
+          title: result.deathTitle || (result.phase === 'survived' ? '你活了下来' : '23:47'),
+          summary: result.deathSummary || '这一轮结束了。房间里的每一个细节都会回到下一次醒来。',
+          method: result.deathMethod,
+        });
+      } else if (result.phase === 'death' && state.phase !== 'death') {
+        setEndingCinematic({
+          key: `death-generic-${Date.now()}`,
+          kind: 'death',
+          title: result.deathTitle || '最后一秒',
+          summary: result.deathSummary || '黑暗来得很快，但这一次你会把这一秒记住，带去下一轮。',
+          method: result.deathMethod,
+        });
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error('[murder-loop] 请求失败:', errMsg);
+      setState(prev => ({
+        ...prev,
+        isParsing: false,
+        storyLog: [
+          ...prev.storyLog,
+          {
+            id: `sys-${Date.now()}`,
+            type: 'system',
+            content: `后端暂时没有回应（${errMsg.slice(0, 60)}），行动未写入循环。`,
+          },
+        ],
+      }));
+    }
+  };
+
+  const handleConfirmAction = () => {
+    setState(prev => ({ ...prev, actionConfirmation: null }));
+  };
+
+  const handleCancelAction = () => {
+    setState(prev => ({ ...prev, actionConfirmation: null }));
+  };
+
+  const handleRestart = () => {
+    setState(resetFrontendProgress());
+    setShowCinematic(true);
+    setEndingCinematic(null);
+    setMobileMenuOpen(false);
+    setActiveClueId(null);
+    setReadClues({});
+  };
+
+  const handleClueSelect = (clue: Clue) => {
+    setActiveClueId(clue.id);
+  };
+
+  const handleClueModalClose = () => {
+    if (activeClueId) {
+      setReadClues(prev => markClueRead(prev, activeClueId));
+    }
+    setActiveClueId(null);
+  };
+
+  const activeClue = activeClueId ? state.clues.find(clue => clue.id === activeClueId) ?? null : null;
+
+  return (
+    <>
+      <RainPlayer />
+
+      <AnimatePresence>
+        {showCinematic && (
+          <CinematicIntro key="cinematic" recap={state.recap} onComplete={() => setShowCinematic(false)} />
+        )}
+        {endingCinematic && (
+          <CinematicTransition
+            key={endingCinematic.key}
+            kind={endingCinematic.kind}
+            title={endingCinematic.title}
+            summary={endingCinematic.summary}
+            method={endingCinematic.method}
+            onComplete={() => { setEndingCinematic(null); setShowCinematic(false); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <ClueRevealModal
+        clue={activeClue}
+        open={Boolean(activeClue)}
+        onClose={handleClueModalClose}
+      />
+
+      <div className="flex flex-col h-screen bg-[#08080a] overflow-hidden text-zinc-200">
+      <Header
+        time={state.time}
+        location={state.location}
+        onRestart={handleRestart}
+      />
+
+      {/* Mobile Sidebar Toggle */}
+      <div className="lg:hidden absolute top-3 right-20 z-50">
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-2 bg-black/50 backdrop-blur rounded-lg border border-white/5 text-zinc-400 hover:text-white"
+        >
+          {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Main Content Area */}
+        <main className="flex-1 flex flex-col min-w-0 border-r border-white/5 relative bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-zinc-900/10 via-[#08080a] to-[#08080a]">
+          <StoryPanel log={state.storyLog} />
+
+          <div className="relative">
+            {/* Soft gradient fade for text going behind input */}
+            <div className="absolute -top-12 left-0 right-0 h-12 bg-gradient-to-t from-[#0c0c0e] to-transparent pointer-events-none" />
+            {state.phase === 'death' || (state.ending && state.phase !== 'loop_started') ? (
+              <div className="shrink-0 z-10 pb-10 pt-20 px-4 md:px-12 bg-gradient-to-t from-[#08080a] to-transparent">
+                <div className="max-w-2xl mx-auto text-center flex flex-col items-center gap-3">
+                  <p className="text-red-400/80 font-serif text-lg tracking-wide">
+                    {state.phase === 'death' ? '你死了。' : '这一轮结束了。'}
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setState(prev => ({ ...prev, isParsing: true }));
+                      try {
+                        const resp = await fetch('/api/harness/turn', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ input: '', state: state.coreState }),
+                        });
+                        if (!resp.ok) throw new Error(`复活失败: ${resp.status}`);
+                        const result = await resp.json() as FrontendResolveResponse;
+                        setState(prev => ({
+                          ...prev,
+                          isParsing: false,
+                          time: result.time ?? prev.time,
+                          location: result.location ?? prev.location,
+                          phase: result.phase ?? prev.phase,
+                          clues: result.clues ?? prev.clues,
+                          coreState: result.coreState ?? prev.coreState,
+                          ending: null,
+                          deathTitle: null,
+                          deathSummary: null,
+                          deathMethod: null,
+                          coordination: result.coordination ?? prev.coordination,
+                          recap: result.recap ?? prev.recap,
+                          sidebar: result.sidebar ?? prev.sidebar,
+                        }));
+                        setShowCinematic(false);
+                      } catch {
+                        setState(prev => ({ ...prev, isParsing: false }));
+                      }
+                    }}
+                    className="px-6 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-300 hover:bg-red-500/20 transition-colors font-serif text-base"
+                  >
+                    再次醒来（保留记忆与线索）
+                  </button>
+                  <p className="text-zinc-600 text-xs mt-1">上一次循环中发现的线索会被保留。</p>
+                </div>
+              </div>
+            ) : (
+              <InputArea
+                onActionSubmit={handleActionSubmit}
+                onConfirmAction={handleConfirmAction}
+                onCancelAction={handleCancelAction}
+                isParsing={state.isParsing}
+                confirmationText={state.actionConfirmation}
+              />
+            )}
+          </div>
+        </main>
+
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block shrink-0 relative z-30">
+          <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} onClueSelect={handleClueSelect} readClues={readClues} />
+        </div>
+
+        {/* Mobile Sidebar Frame */}
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+              className="absolute inset-y-0 right-0 w-80 z-40 lg:hidden shadow-2xl bg-[#08080a]"
+            >
+               <Sidebar clues={state.clues} coordination={state.coordination} sidebar={state.sidebar} recap={state.recap} onClueSelect={handleClueSelect} readClues={readClues} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+    </>
+  );
+}
