@@ -35,6 +35,32 @@ function calculateTurnTime(actions: ActionPlan['actions']) {
   return clamp(analyzedMinutes, 1, 5);
 }
 
+const usableItemIds = new Set([
+  'tape',
+  'first_aid_kit',
+  'phone_charger',
+  'lighter',
+  'screwdriver',
+  'hanger',
+  'mirror',
+  'bleach',
+  'pen_paper',
+  'newspaper',
+  'belt',
+  'flashlight',
+]);
+
+function resolveUsableItemId(action: ActionPlan['actions'][number]) {
+  const explicit = (action as any).itemId as string | undefined;
+  if (explicit) return explicit;
+  if (usableItemIds.has(action.target)) return action.target;
+
+  const actionText = `${action.raw} ${action.method ?? ''} ${action.target}`.toLowerCase();
+  const chargesPhone = action.target === 'phone'
+    && (actionText.includes('充电') || actionText.includes('charger') || actionText.includes('charge'));
+  return chargesPhone ? 'phone_charger' : undefined;
+}
+
 function extractReplyText(raw: string) {
   const quoted = raw.match(/[“"']([^”"']+)[”"']/)?.[1]?.trim();
   if (quoted) return quoted;
@@ -275,7 +301,7 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
         break;
       }
       case 'use_item': {
-        const itemId = (action as any).itemId as string | undefined;
+        const itemId = resolveUsableItemId(action);
         if (itemId === 'tape' && state.playerHolding === 'tape') {
           state.room.front_door.state.barricaded = true;
           texts.push('使用胶带：门缝被胶带封住，加固了临时防御。');
@@ -293,6 +319,9 @@ export function applyPlayerActions(current: GameState, plan: ActionPlan): RuleRe
           state.phoneBattery = Math.min(61, state.phoneBattery + 30);
           state.phoneFunctional = true;
           phoneChargedThisTurn = true;
+          if (state.room.phone_charger?.state) {
+            state.room.phone_charger.state.pluggedIn = true;
+          }
           if (state.room.phone?.state) {
             (state.room.phone.state as any).battery = state.phoneBattery;
           }

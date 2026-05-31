@@ -52,6 +52,16 @@ export const initialRoomObjects: Record<string, RoomObjectState> = {
       battery: 61,
     },
   },
+  phone_charger: {
+    id: 'phone_charger',
+    name: '手机充电器',
+    location: 'desk',
+    visible: true,
+    inspected: false,
+    state: {
+      pluggedIn: false,
+    },
+  },
   chair: {
     id: 'chair',
     name: '椅子',

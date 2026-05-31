@@ -19,8 +19,5 @@
     "concurrently": "^9.2.1",
     "typescript": "^5.6.3",
     "vitest": "^4.1.7"
-  },
-  "dependencies": {
-    "murder-loop": "file:../murder-loop"
   }
 }
